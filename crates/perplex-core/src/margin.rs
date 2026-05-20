@@ -198,4 +198,103 @@ mod tests {
             liq
         );
     }
+
+    use proptest::prelude::*;
+
+    /// Random Decimal with magnitude in [10^-3, 10^5] and chosen sign.
+    fn arb_size() -> impl Strategy<Value = Decimal> {
+        (1i64..=100_000, prop::bool::ANY).prop_map(|(n, neg)| {
+            let v = Decimal::new(n, 3);
+            if neg {
+                -v
+            } else {
+                v
+            }
+        })
+    }
+
+    /// Random Decimal with magnitude in [50, 200_000].
+    fn arb_price() -> impl Strategy<Value = Decimal> {
+        (50_000i64..=200_000_000).prop_map(|n| Decimal::new(n, 3))
+    }
+
+    proptest! {
+        /// Opening into an empty position must record entry == fill_price and realise nothing.
+        #[test]
+        fn invariant_open_records_fill_price(
+            delta in arb_size(),
+            price in arb_price(),
+        ) {
+            let mut p = pos(Decimal::ZERO, Decimal::ZERO);
+            let realised = apply_fill(&mut p, delta, price);
+            prop_assert_eq!(realised, Decimal::ZERO);
+            prop_assert_eq!(p.size, delta);
+            prop_assert_eq!(p.entry_price, price);
+        }
+
+        /// Same-side add: realised == 0 AND the new entry lies between min and max of
+        /// (old_entry, fill_price).
+        #[test]
+        fn invariant_same_side_add_entry_bounded(
+            init_size in arb_size().prop_filter("nonzero", |s| !s.is_zero()),
+            init_entry in arb_price(),
+            add_mag in 1i64..=10_000,
+            fill_price in arb_price(),
+        ) {
+            let mut p = pos(init_size, init_entry);
+            // same-side add: same sign as init_size
+            let add = if init_size.is_sign_positive() {
+                Decimal::new(add_mag, 3)
+            } else {
+                -Decimal::new(add_mag, 3)
+            };
+            let realised = apply_fill(&mut p, add, fill_price);
+            prop_assert_eq!(realised, Decimal::ZERO);
+            let lo = init_entry.min(fill_price);
+            let hi = init_entry.max(fill_price);
+            prop_assert!(p.entry_price >= lo, "entry {} < lo {}", p.entry_price, lo);
+            prop_assert!(p.entry_price <= hi, "entry {} > hi {}", p.entry_price, hi);
+        }
+
+        /// Full close: size and entry zeroed, realised matches old_size * (price - entry).
+        #[test]
+        fn invariant_full_close(
+            init_size in arb_size().prop_filter("nonzero", |s| !s.is_zero()),
+            init_entry in arb_price(),
+            fill_price in arb_price(),
+        ) {
+            let mut p = pos(init_size, init_entry);
+            let realised = apply_fill(&mut p, -init_size, fill_price);
+            prop_assert_eq!(p.size, Decimal::ZERO);
+            prop_assert_eq!(p.entry_price, Decimal::ZERO);
+            let expected = init_size * (fill_price - init_entry);
+            prop_assert_eq!(realised, expected);
+        }
+
+        /// Partial close (opposite side but not flipped): entry UNCHANGED.
+        #[test]
+        fn invariant_partial_close_entry_unchanged(
+            init_mag in 100i64..=100_000,
+            init_pos in prop::bool::ANY,
+            init_entry in arb_price(),
+            close_frac_n in 1i64..=99,
+            fill_price in arb_price(),
+        ) {
+            let init_size = if init_pos { Decimal::new(init_mag, 3) } else { -Decimal::new(init_mag, 3) };
+            // partial close: same magnitude direction (opposite sign of size), less than |init|
+            let close_mag = init_mag * close_frac_n / 100;
+            let close = if init_size.is_sign_positive() {
+                -Decimal::new(close_mag, 3)
+            } else {
+                Decimal::new(close_mag, 3)
+            };
+            // Skip degenerate cases where rounding zeroes the close.
+            if close.is_zero() {
+                return Ok(());
+            }
+            let mut p = pos(init_size, init_entry);
+            apply_fill(&mut p, close, fill_price);
+            prop_assert_eq!(p.entry_price, init_entry);
+        }
+    }
 }
