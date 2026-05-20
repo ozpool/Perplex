@@ -36,6 +36,9 @@ interface IPositionRegistry {
     /// @notice Advance the cumulative funding index for a market. Phase 4 FundingEngine drives this.
     function updateFunding(bytes32 marketId, int256 newCumulativeIndex) external;
 
+    /// @notice Read the current cumulative funding index for a market (1e18 scale).
+    function marketIndexFunding(bytes32 marketId) external view returns (int256);
+
     function isWithdrawSafe(address user, uint256 amount) external view returns (bool);
 
     function unrealisedPnl(address user, bytes32 marketId, uint256 oraclePriceX18)

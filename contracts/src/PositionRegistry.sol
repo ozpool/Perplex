@@ -28,6 +28,7 @@ contract PositionRegistry is IPositionRegistry {
     ICollateralVault public collateralVault; // settable once
     address public settlementEngine;
     address public liquidationEngine;
+    address public fundingEngine;
     address public owner;
 
     /// @notice user => marketId => Position
@@ -42,10 +43,14 @@ contract PositionRegistry is IPositionRegistry {
 
     error NotOwner();
     error NotSettlement();
+    error NotFundingAuthority();
     error AlreadyWired();
+    error FundingAlreadySet();
     error ZeroAddress();
     error MarketInactive(bytes32 marketId);
     error VaultUnavailable();
+
+    event FundingEngineSet(address indexed engine);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -78,6 +83,14 @@ contract PositionRegistry is IPositionRegistry {
         collateralVault = _vault;
         settlementEngine = _settlement;
         liquidationEngine = _liquidation;
+    }
+
+    /// @notice Bind the funding engine. Callable once by owner.
+    function setFundingEngine(address _funding) external onlyOwner {
+        if (fundingEngine != address(0)) revert FundingAlreadySet();
+        if (_funding == address(0)) revert ZeroAddress();
+        fundingEngine = _funding;
+        emit FundingEngineSet(_funding);
     }
 
     // -- write paths ----------------------------------------------------------
@@ -115,7 +128,8 @@ contract PositionRegistry is IPositionRegistry {
     }
 
     /// @inheritdoc IPositionRegistry
-    function updateFunding(bytes32 marketId, int256 newCumulativeIndex) external onlyOwner {
+    function updateFunding(bytes32 marketId, int256 newCumulativeIndex) external {
+        if (msg.sender != fundingEngine && msg.sender != owner) revert NotFundingAuthority();
         int256 prev = marketIndexFunding[marketId];
         marketIndexFunding[marketId] = newCumulativeIndex;
         emit FundingIndexUpdated(marketId, prev, newCumulativeIndex);

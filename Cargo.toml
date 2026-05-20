@@ -3,12 +3,12 @@ resolver = "2"
 members = [
     "crates/perplex-core",
     "crates/perplex-diff-gen",
+    "crates/perplex-funding",
     "crates/perplex-matching",
     "crates/perplex-oracle",
     # additional crates land in their respective phases:
     #   "crates/perplex-settlement"  (Phase 2 — handled by Solidity SettlementEngine for now)
     #   "crates/perplex-liquidator"  (Phase 4)
-    #   "crates/perplex-funding"     (Phase 4)
     #   "crates/perplex-edge"        (Phase 5)
     #   "crates/perplex-cli"         (Phase 7)
     #   "crates/perplex-mock-oracle" (added when HTTP stub is wired)

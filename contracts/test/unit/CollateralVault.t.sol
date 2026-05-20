@@ -47,6 +47,10 @@ contract MockRegistry is IPositionRegistry {
 
     function updateFunding(bytes32, int256) external override {}
 
+    function marketIndexFunding(bytes32) external pure override returns (int256) {
+        return 0;
+    }
+
     function unrealisedPnl(address, bytes32, uint256) external pure override returns (int256) {
         return 0;
     }
