@@ -13,6 +13,7 @@ pub mod openapi;
 pub mod router;
 pub mod state;
 pub mod types;
+pub mod ws;
 
 pub use error::ApiError;
 pub use router::{build_router, build_router_with_dev_token};

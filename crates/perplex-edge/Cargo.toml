@@ -10,7 +10,9 @@ perplex-core = { path = "../perplex-core" }
 perplex-matching = { path = "../perplex-matching" }
 async-trait = "0.1"
 axum = { workspace = true }
+futures-util = "0.3"
 tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 serde = { workspace = true }
@@ -32,6 +34,8 @@ clap = { workspace = true }
 [dev-dependencies]
 reqwest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
 serial_test = "3"
 
 [[bin]]
