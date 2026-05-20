@@ -1,0 +1,25 @@
+{
+  "name": "perplex",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Perplex — decentralised perpetuals exchange. Scripts and tooling root.",
+  "license": "BUSL-1.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "seed": "tsx scripts/seed.ts",
+    "smoke:trade": "tsx scripts/smoke-trade.ts",
+    "smoke:liquidate": "tsx scripts/smoke-liquidate.ts",
+    "smoke:deposit": "tsx scripts/smoke-deposit.ts"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
