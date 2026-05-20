@@ -16,13 +16,19 @@
 //! dispatcher + Redis Streams writers; Phase 3c adds the criterion bench suite.
 
 pub mod book;
+pub mod dispatcher;
 pub mod error;
 pub mod fill;
 pub mod order;
 pub mod position_tracker;
+pub mod stream;
 
 pub use book::{Orderbook, Side};
+pub use dispatcher::{Dispatcher, EngineCmd};
 pub use error::SubmitError;
 pub use fill::Fill;
 pub use order::{Order, OrderType, TimeInForce};
 pub use position_tracker::PositionTracker;
+pub use stream::{
+    BookDelta, BookDeltaStream, FillStream, MemoryStream, RedisStreamWriter, StreamError,
+};
