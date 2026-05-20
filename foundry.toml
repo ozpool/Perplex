@@ -9,6 +9,8 @@ optimizer = true
 optimizer_runs = 200
 via_ir = false
 verbosity = 2
+# Deploy scripts write deployment manifests; tests do not need write access anywhere.
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 [profile.default.fuzz]
 runs = 1000

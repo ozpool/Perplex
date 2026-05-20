@@ -9,6 +9,9 @@ contracts/cache/
 contracts/broadcast/
 # NOTE: contracts/lib/ holds git submodules (forge-std, openzeppelin-contracts, solady) — NOT ignored.
 cache/
+broadcast/
+# Deploy manifests are machine-specific; each contributor generates their own via forge script.
+deployments/
 
 # Node / Frontend
 node_modules/
