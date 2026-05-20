@@ -73,6 +73,9 @@ diff-fixtures: ## Regenerate the differential test fixtures (Rust → JSON)
 	    > contracts/test/differential/fixtures.json
 	@echo "fixtures regenerated; commit contracts/test/differential/fixtures.json"
 
+bench: ## Run criterion microbenchmarks for perplex-matching
+	cargo bench -p perplex-matching
+
 clean: ## Clean build artefacts
 	cargo clean
 	cd contracts && forge clean
