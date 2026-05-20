@@ -1,0 +1,62 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+lcov.info
+*.lcov
+
+# Build outputs
+*.pyc
+__pycache__/
+
+# Local secrets / keys (defence in depth)
+*.pem
+*.key
+keystore/
+secrets/
+
+# Audit reports (kept out until released)
+audits/*-draft.pdf
+
+# Local sqlite / dumps
+*.sqlite
+*.db
+dumps/
