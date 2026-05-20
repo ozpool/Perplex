@@ -3,13 +3,13 @@ resolver = "2"
 members = [
     "crates/perplex-core",
     "crates/perplex-diff-gen",
+    "crates/perplex-edge",
     "crates/perplex-funding",
     "crates/perplex-matching",
     "crates/perplex-oracle",
     # additional crates land in their respective phases:
     #   "crates/perplex-settlement"  (Phase 2 — handled by Solidity SettlementEngine for now)
     #   "crates/perplex-liquidator"  (Phase 4)
-    #   "crates/perplex-edge"        (Phase 5)
     #   "crates/perplex-cli"         (Phase 7)
     #   "crates/perplex-mock-oracle" (added when HTTP stub is wired)
 ]
@@ -48,6 +48,11 @@ criterion = { version = "0.5", features = ["html_reports"] }
 reqwest = { version = "0.12", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 clap = { version = "4", features = ["derive", "env"] }
+utoipa = { version = "5", features = ["axum_extras", "chrono", "uuid"] }
+utoipa-swagger-ui = { version = "8", features = ["axum"] }
+jsonwebtoken = "9"
+parking_lot = "0.12"
+ulid = { version = "1.1", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

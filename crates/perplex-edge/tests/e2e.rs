@@ -1,0 +1,248 @@
+//! End-to-end test: boot the server on a random port and hit every endpoint defined in
+//! api-contract.md sections 1.1-1.11. Covers status code, content-type, and a minimal shape
+//! check on the JSON body. Auth path uses the dev-only `/__dev/token/:address` helper.
+
+use std::time::Duration;
+
+use perplex_edge::{build_router_with_dev_token_for_tests, AppState};
+use reqwest::StatusCode;
+use serde_json::Value;
+
+mod helpers {
+    pub fn jwt_secret() -> Vec<u8> {
+        b"e2e-test-secret-not-for-prod".to_vec()
+    }
+}
+
+async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
+    let state = AppState::new(helpers::jwt_secret());
+    let router = build_router_with_dev_token_for_tests(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    // give the listener a tick to settle
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    (format!("http://127.0.0.1:{port}"), handle)
+}
+
+async fn dev_token(client: &reqwest::Client, base: &str, addr: &str) -> String {
+    let raw = client
+        .get(format!("{base}/__dev/token/{addr}"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    raw.trim().trim_start_matches("Bearer ").to_string()
+}
+
+#[tokio::test]
+async fn e2e_all_eleven_endpoints() {
+    let (base, handle) = spawn_server().await;
+    let client = reqwest::Client::new();
+    let addr = "0x000000000000000000000000000000000000aBcD";
+    let bearer = dev_token(&client, &base, addr).await;
+    let auth_value = format!("Bearer {bearer}");
+
+    // 1.1 markets — public.
+    let res = client
+        .get(format!("{base}/v1/markets"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.1 markets status");
+    let body: Value = res.json().await.unwrap();
+    assert!(body["markets"].as_array().unwrap().len() >= 3);
+
+    // 1.2 orderbook.
+    let res = client
+        .get(format!("{base}/v1/orderbook/btc-usd?depth=50"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.2 orderbook");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["marketId"], "btc-usd");
+
+    // 1.2 orderbook — unknown market 404.
+    let res = client
+        .get(format!("{base}/v1/orderbook/nope"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // 1.3 trades.
+    let res = client
+        .get(format!("{base}/v1/trades/btc-usd?limit=10"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.3 trades");
+    let body: Value = res.json().await.unwrap();
+    assert!(body["trades"].is_array());
+
+    // 1.4 funding.
+    let res = client
+        .get(format!("{base}/v1/funding/btc-usd?range=24h"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.4 funding");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["marketId"], "btc-usd");
+
+    // 1.10 SIWE nonce.
+    let res = client
+        .post(format!("{base}/v1/auth/siwe/nonce"))
+        .json(&serde_json::json!({"address": addr}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.10 nonce");
+    let body: Value = res.json().await.unwrap();
+    let nonce = body["nonce"].as_str().unwrap().to_string();
+
+    // 1.10 SIWE verify — synthesise a dev message that round-trips the nonce.
+    let dev_msg = format!(
+        "perplex.local wants you to sign in\nAddress: {addr}\nNonce: {nonce}\nIssued At: 2026-05-20T12:00:00Z"
+    );
+    let dev_sig = "0x".to_string() + &"00".repeat(65);
+    let res = client
+        .post(format!("{base}/v1/auth/siwe/verify"))
+        .json(&serde_json::json!({"message": dev_msg, "signature": dev_sig}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.10 verify");
+    let body: Value = res.json().await.unwrap();
+    assert!(!body["jwt"].as_str().unwrap().is_empty());
+
+    // 1.5 place order — authed.
+    let order_req = serde_json::json!({
+        "marketId": "btc-usd",
+        "side": "buy",
+        "type": "limit",
+        "price": "99500.0",
+        "qty": "0.1",
+        "timeInForce": "gtc",
+        "reduceOnly": false,
+        "postOnly": false,
+        "clientOrderId": "cli-001",
+        "nonce": "1716192000123456789",
+        "signature": "0x".to_string() + &"00".repeat(65),
+    });
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .header("Authorization", &auth_value)
+        .json(&order_req)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.5 place");
+    let body: Value = res.json().await.unwrap();
+    let order_id = body["orderId"].as_str().unwrap().to_string();
+
+    // 1.7 open orders.
+    let res = client
+        .get(format!("{base}/v1/orders/open"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.7 open orders");
+    let body: Value = res.json().await.unwrap();
+    let orders = body["orders"].as_array().unwrap();
+    assert!(orders.iter().any(|o| o["id"] == order_id));
+
+    // 1.6 cancel order — idempotent.
+    let res = client
+        .delete(format!("{base}/v1/orders/{order_id}"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.6 cancel");
+    let res = client
+        .delete(format!("{base}/v1/orders/{order_id}"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.6 cancel idempotent");
+
+    // 1.8 positions.
+    let res = client
+        .get(format!("{base}/v1/positions"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.8 positions");
+
+    // 1.9 fills.
+    let res = client
+        .get(format!("{base}/v1/fills?limit=100"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.9 fills");
+
+    // 1.11 balance.
+    let res = client
+        .get(format!("{base}/v1/account/balance"))
+        .header("Authorization", &auth_value)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "1.11 balance");
+
+    // Auth missing on authed route → 401.
+    let res = client
+        .get(format!("{base}/v1/positions"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // OpenAPI doc served.
+    let res = client
+        .get(format!("{base}/docs/openapi.json"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["info"]["title"], "Perplex Edge API");
+
+    handle.abort();
+}
+
+#[tokio::test]
+async fn place_order_rejects_unknown_market() {
+    let (base, handle) = spawn_server().await;
+    let client = reqwest::Client::new();
+    let bearer = dev_token(&client, &base, "0x000000000000000000000000000000000000aBcD").await;
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .bearer_auth(bearer)
+        .json(&serde_json::json!({
+            "marketId": "nope-usd",
+            "side": "buy",
+            "type": "limit",
+            "price": "1",
+            "qty": "1",
+            "timeInForce": "gtc",
+            "nonce": "1",
+            "signature": "0x".to_string() + &"00".repeat(65),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    handle.abort();
+}

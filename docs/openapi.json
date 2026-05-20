@@ -1,0 +1,944 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Perplex Edge API",
+    "description": "REST surface for the Perplex perpetuals DEX. See api-contract.md for the full spec.",
+    "license": {
+      "name": "BUSL-1.1",
+      "identifier": "BUSL-1.1"
+    },
+    "version": "1.1"
+  },
+  "paths": {
+    "/v1/account/balance": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "get_balance",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/siwe/nonce": {
+      "post": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "siwe_nonce",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiweNonceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiweNonceResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/auth/siwe/verify": {
+      "post": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "siwe_verify",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiweVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiweVerifyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fills": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "list_fills",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FillsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/funding/{marketId}": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "get_funding",
+        "parameters": [
+          {
+            "name": "marketId",
+            "in": "path",
+            "description": "Market id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/markets": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "list_markets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orderbook/{marketId}": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "get_orderbook",
+        "parameters": [
+          {
+            "name": "marketId",
+            "in": "path",
+            "description": "Market id, e.g. btc-usd",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderbookSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders": {
+      "post": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "place_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceOrderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation failure"
+          },
+          "401": {
+            "description": "auth failure"
+          }
+        }
+      }
+    },
+    "/v1/orders/open": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "list_open_orders",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenOrdersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orders/{orderId}": {
+      "delete": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "cancel_order",
+        "parameters": [
+          {
+            "name": "orderId",
+            "in": "path",
+            "description": "Order id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOrderResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/positions": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "list_positions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/trades/{marketId}": {
+      "get": {
+        "tags": [
+          "handlers"
+        ],
+        "operationId": "get_trades",
+        "parameters": [
+          {
+            "name": "marketId",
+            "in": "path",
+            "description": "Market id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BalanceResponse": {
+        "type": "object",
+        "required": [
+          "vaultBalanceUsdc",
+          "walletUsdcBalance",
+          "pendingDeposits",
+          "pendingWithdrawals"
+        ],
+        "properties": {
+          "pendingDeposits": {
+            "type": "array",
+            "items": {}
+          },
+          "pendingWithdrawals": {
+            "type": "array",
+            "items": {}
+          },
+          "vaultBalanceUsdc": {
+            "type": "string"
+          },
+          "walletUsdcBalance": {
+            "type": "string"
+          }
+        }
+      },
+      "CancelOrderResponse": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "status"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "FillInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "orderId",
+          "marketId",
+          "side",
+          "price",
+          "qty",
+          "feeUsdc",
+          "role",
+          "tsNs",
+          "txHash"
+        ],
+        "properties": {
+          "feeUsdc": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "description": "\"taker\" or \"maker\"."
+          },
+          "side": {
+            "type": "string"
+          },
+          "tsNs": {
+            "type": "string"
+          },
+          "txHash": {
+            "type": "string"
+          }
+        }
+      },
+      "FillsResponse": {
+        "type": "object",
+        "required": [
+          "fills"
+        ],
+        "properties": {
+          "fills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FillInfo"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "FundingHistoryPoint": {
+        "type": "object",
+        "required": [
+          "tsNs",
+          "rateBps"
+        ],
+        "properties": {
+          "rateBps": {
+            "type": "number",
+            "format": "double"
+          },
+          "tsNs": {
+            "type": "string"
+          }
+        }
+      },
+      "FundingResponse": {
+        "type": "object",
+        "required": [
+          "marketId",
+          "currentRateBps",
+          "nextSettlementTsNs",
+          "history"
+        ],
+        "properties": {
+          "currentRateBps": {
+            "type": "number",
+            "format": "double"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FundingHistoryPoint"
+            }
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "nextSettlementTsNs": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "base",
+          "quote",
+          "active",
+          "tickSize",
+          "lotSize",
+          "maxLeverage",
+          "imRatioBps",
+          "mmRatioBps",
+          "liqBonusBps",
+          "takerFeeBps",
+          "makerRebateBps",
+          "fundingIntervalSec",
+          "indexPriceX18"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "base": {
+            "type": "string"
+          },
+          "fundingIntervalSec": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "imRatioBps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "indexPriceX18": {
+            "type": "string"
+          },
+          "liqBonusBps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "lotSize": {
+            "type": "string"
+          },
+          "makerRebateBps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "maxLeverage": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "mmRatioBps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "quote": {
+            "type": "string"
+          },
+          "takerFeeBps": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "tickSize": {
+            "type": "string"
+          }
+        }
+      },
+      "MarketsResponse": {
+        "type": "object",
+        "required": [
+          "markets"
+        ],
+        "properties": {
+          "markets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketInfo"
+            }
+          }
+        }
+      },
+      "OpenOrder": {
+        "type": "object",
+        "required": [
+          "id",
+          "marketId",
+          "side",
+          "type",
+          "price",
+          "qty",
+          "remaining",
+          "tsNs"
+        ],
+        "properties": {
+          "clientOrderId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "string"
+          },
+          "remaining": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string"
+          },
+          "tsNs": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "OpenOrdersResponse": {
+        "type": "object",
+        "required": [
+          "orders"
+        ],
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OpenOrder"
+            }
+          }
+        }
+      },
+      "OrderbookSnapshot": {
+        "type": "object",
+        "required": [
+          "marketId",
+          "sequence",
+          "bids",
+          "asks",
+          "tsNs"
+        ],
+        "properties": {
+          "asks": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "bids": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Each entry: `[priceX18AsDecimalString, qtyAsDecimalString]`."
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "tsNs": {
+            "type": "string"
+          }
+        }
+      },
+      "PlaceOrderRequest": {
+        "type": "object",
+        "required": [
+          "marketId",
+          "side",
+          "type",
+          "qty",
+          "timeInForce",
+          "nonce",
+          "signature"
+        ],
+        "properties": {
+          "clientOrderId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "postOnly": {
+            "type": "boolean"
+          },
+          "price": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "qty": {
+            "type": "string"
+          },
+          "reduceOnly": {
+            "type": "boolean"
+          },
+          "side": {
+            "type": "string",
+            "description": "\"buy\" or \"sell\"."
+          },
+          "signature": {
+            "type": "string"
+          },
+          "timeInForce": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "\"market\" or \"limit\"."
+          }
+        }
+      },
+      "PlaceOrderResponse": {
+        "type": "object",
+        "required": [
+          "orderId",
+          "status",
+          "tsNs"
+        ],
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tsNs": {
+            "type": "string"
+          }
+        }
+      },
+      "PositionInfo": {
+        "type": "object",
+        "required": [
+          "marketId",
+          "size",
+          "side",
+          "entryPriceX18",
+          "markPriceX18",
+          "notionalUsdc",
+          "unrealisedPnlUsdc",
+          "realisedPnlUsdc",
+          "leverage",
+          "liquidationPriceX18",
+          "fundingPaidUsdc",
+          "lastUpdatedTsNs"
+        ],
+        "properties": {
+          "entryPriceX18": {
+            "type": "string"
+          },
+          "fundingPaidUsdc": {
+            "type": "string"
+          },
+          "lastUpdatedTsNs": {
+            "type": "string"
+          },
+          "leverage": {
+            "type": "string"
+          },
+          "liquidationPriceX18": {
+            "type": "string"
+          },
+          "markPriceX18": {
+            "type": "string"
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "notionalUsdc": {
+            "type": "string"
+          },
+          "realisedPnlUsdc": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "description": "\"long\" or \"short\"."
+          },
+          "size": {
+            "type": "string"
+          },
+          "unrealisedPnlUsdc": {
+            "type": "string"
+          }
+        }
+      },
+      "PositionsResponse": {
+        "type": "object",
+        "required": [
+          "collateralUsdc",
+          "freeCollateralUsdc",
+          "totalUnrealisedPnlUsdc",
+          "totalNotionalUsdc",
+          "positions"
+        ],
+        "properties": {
+          "collateralUsdc": {
+            "type": "string"
+          },
+          "freeCollateralUsdc": {
+            "type": "string"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionInfo"
+            }
+          },
+          "totalNotionalUsdc": {
+            "type": "string"
+          },
+          "totalUnrealisedPnlUsdc": {
+            "type": "string"
+          }
+        }
+      },
+      "PublicTrade": {
+        "type": "object",
+        "required": [
+          "id",
+          "marketId",
+          "price",
+          "qty",
+          "side",
+          "tsNs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "marketId": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "string"
+          },
+          "side": {
+            "type": "string",
+            "description": "\"buy\" or \"sell\"."
+          },
+          "tsNs": {
+            "type": "string"
+          }
+        }
+      },
+      "SiweNonceRequest": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          }
+        }
+      },
+      "SiweNonceResponse": {
+        "type": "object",
+        "required": [
+          "nonce"
+        ],
+        "properties": {
+          "nonce": {
+            "type": "string"
+          }
+        }
+      },
+      "SiweVerifyRequest": {
+        "type": "object",
+        "required": [
+          "message",
+          "signature"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        }
+      },
+      "SiweVerifyResponse": {
+        "type": "object",
+        "required": [
+          "jwt",
+          "expiresAt"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "string"
+          },
+          "jwt": {
+            "type": "string"
+          }
+        }
+      },
+      "TradesResponse": {
+        "type": "object",
+        "required": [
+          "trades"
+        ],
+        "properties": {
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trades": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicTrade"
+            }
+          }
+        }
+      }
+    }
+  }
+}
