@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/perplex-core",
+    "crates/perplex-diff-gen",
     # additional crates land in their respective phases:
     #   "crates/perplex-settlement"  (Phase 2)
     #   "crates/perplex-matching"    (Phase 3)

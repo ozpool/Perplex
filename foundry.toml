@@ -9,8 +9,16 @@ optimizer = true
 optimizer_runs = 200
 via_ir = false
 verbosity = 2
-# Deploy scripts write deployment manifests; tests do not need write access anywhere.
-fs_permissions = [{ access = "read-write", path = "./deployments" }]
+# Block gas limit raised so the differential test can replay all fixtures in a single
+# call; production deploys still observe Arbitrum's real block gas limit.
+gas_limit = "18446744073709551615"
+block_gas_limit = "10000000000"
+# Deploy scripts write deployment manifests; tests read fixture JSON from
+# contracts/test/differential.
+fs_permissions = [
+    { access = "read-write", path = "./deployments" },
+    { access = "read", path = "./contracts/test/differential" },
+]
 
 [profile.default.fuzz]
 runs = 1000

@@ -1,0 +1,20 @@
+[package]
+name = "perplex-diff-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "gen-vwap-fixtures"
+path = "src/main.rs"
+
+[dependencies]
+perplex-core = { path = "../perplex-core" }
+rust_decimal = { workspace = true }
+rust_decimal_macros = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rand = "0.8"
+rand_xoshiro = "0.6"

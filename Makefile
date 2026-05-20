@@ -68,6 +68,11 @@ fmt: ## Format rust + solidity
 	cargo fmt --all
 	cd contracts && forge fmt
 
+diff-fixtures: ## Regenerate the differential test fixtures (Rust → JSON)
+	cargo run -p perplex-diff-gen --release --bin gen-vwap-fixtures \
+	    > contracts/test/differential/fixtures.json
+	@echo "fixtures regenerated; commit contracts/test/differential/fixtures.json"
+
 clean: ## Clean build artefacts
 	cargo clean
 	cd contracts && forge clean
