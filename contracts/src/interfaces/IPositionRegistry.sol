@@ -23,8 +23,18 @@ interface IPositionRegistry {
     );
 
     event FundingSettled(address indexed user, bytes32 indexed marketId, int256 fundingDelta);
+    event FundingIndexUpdated(bytes32 indexed marketId, int256 previousIndex, int256 newIndex);
 
-    function applyFill(address user, bytes32 marketId, int256 sizeDelta, uint256 priceX18) external;
+    /// @notice Apply a fill to a position. Settles accrued funding first, then runs VWAP math
+    ///         per docs/margin-math.md. Returns the realised PnL on any closed portion and the
+    ///         funding delta absorbed since the last touch. Caller (SettlementEngine) is
+    ///         responsible for applying both deltas to the collateral vault.
+    function applyFill(address user, bytes32 marketId, int256 sizeDelta, uint256 priceX18)
+        external
+        returns (int256 realisedPnl, int256 fundingDelta);
+
+    /// @notice Advance the cumulative funding index for a market. Phase 4 FundingEngine drives this.
+    function updateFunding(bytes32 marketId, int256 newCumulativeIndex) external;
 
     function isWithdrawSafe(address user, uint256 amount) external view returns (bool);
 
@@ -33,7 +43,15 @@ interface IPositionRegistry {
         view
         returns (int256);
 
+    /// @notice Health factor scaled 1e18. Below 1e18 means liquidatable.
+    ///         Returns type(uint256).max when there is no position in this market.
     function healthFactor(address user, bytes32 marketId, uint256 priceX18) external view returns (uint256);
+
+    /// @notice Liquidation mark price for this single position, scaled 1e18.
+    ///         Returns 0 when there is no position in this market.
+    ///         Computed as if this were the user's only position; multi-position liquidation
+    ///         price is approximated by FE.
+    function liquidationPrice(address user, bytes32 marketId) external view returns (uint256);
 
     function positions(address user, bytes32 marketId) external view returns (Position memory);
 

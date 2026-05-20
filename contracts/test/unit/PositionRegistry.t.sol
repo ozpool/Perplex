@@ -153,13 +153,15 @@ contract PositionRegistryTest is Test {
         assertTrue(registry.isWithdrawSafe(alice, 1_000 * 1e6));
     }
 
-    function test_isWithdrawSafeReturnsFalseAfterApplyFill() public {
+    function test_applyFillReturnsZeroRealisedOnOpen() public {
         _wire();
         vm.prank(settlement);
-        registry.applyFill(alice, BTC, 1e18, 100_000e18);
-        // Phase 1 stub returns false for any user who has touched a market. Phase 2 implements
-        // the real formula; the test will be updated then.
-        assertFalse(registry.isWithdrawSafe(alice, 1));
+        (int256 realised, int256 fundingDelta) = registry.applyFill(alice, BTC, 1e18, 100_000e18);
+        assertEq(realised, 0);
+        assertEq(fundingDelta, 0);
+        IPositionRegistry.Position memory p = registry.positions(alice, BTC);
+        assertEq(p.size, 1e18);
+        assertEq(p.entryPriceX18, 100_000e18);
     }
 
     function _wire() internal {
