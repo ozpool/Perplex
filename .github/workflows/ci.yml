@@ -58,13 +58,9 @@ jobs:
         run: cargo test --workspace --all-features
 
   devnet-smoke:
-    name: devnet smoke (gated on Phase 1)
+    name: devnet smoke
     runs-on: ubuntu-latest
     needs: [contracts, rust]
-    # Smoke runs the full make dev-up which depends on Phase 1 Deploy.s.sol +
-    # seed.ts package.json. Until those land, this job is informational only;
-    # remove continue-on-error once Phase 1 is merged.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,9 +68,8 @@ jobs:
 
       - uses: foundry-rs/foundry-toolchain@v1
       - uses: dtolnay/rust-toolchain@stable
+      # pnpm version is read from package.json packageManager field.
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -86,13 +81,16 @@ jobs:
       - name: dev-up
         run: make dev-up
 
-      - name: dev-trade smoke
+      - name: smoke deposit / withdraw
+        run: make dev-deposit
+
+      - name: smoke trade (Phase 3 stub)
         run: make dev-trade
 
-      - name: dev-liquidate smoke
+      - name: smoke liquidate (Phase 4 stub)
         run: make dev-liquidate
 
-      - name: dev-logs on failure
+      - name: docker logs on failure
         if: failure()
         run: docker compose logs
 

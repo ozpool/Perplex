@@ -1,20 +1,25 @@
-.PHONY: help dev-up dev-down dev-reset dev-trade dev-liquidate dev-logs build test test-contracts test-rust lint fmt clean
+.PHONY: help install dev-up dev-down dev-reset dev-deposit dev-trade dev-liquidate dev-logs deploy-sepolia-dry deploy-sepolia build test test-contracts test-rust lint fmt clean
+# Default anvil deployer key. Override per-env when deploying to Sepolia / mainnet.
+DEPLOYER_PRIVATE_KEY ?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
 help: ## Show available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
-dev-up: ## Start local stack (anvil + db + redis + mock-pyth) and seed
+install: ## Install Node deps for the smoke scripts
+	pnpm install --frozen-lockfile
+
+dev-up: install ## Start local stack and deploy contracts; seed wallets
 	docker compose up -d
 	./scripts/wait-for-anvil.sh
 	./scripts/wait-for-postgres.sh
-	cd contracts && forge script script/Deploy.s.sol --rpc-url http://localhost:8545 --broadcast --silent
+	cd contracts && DEPLOYER_PRIVATE_KEY=$(DEPLOYER_PRIVATE_KEY) forge script script/Deploy.s.sol \
+	  --rpc-url http://localhost:8545 --broadcast --silent
 	pnpm tsx scripts/seed.ts
 	@echo ""
 	@echo "Local Perplex devnet ready."
 	@echo "  Anvil   http://localhost:8545"
 	@echo "  Pg      postgres://perplex:perplex@localhost:5432/perplex"
 	@echo "  Redis   redis://localhost:6379"
-	@echo "  Pyth    http://localhost:8546"
 	@echo ""
 
 dev-down: ## Stop containers (keep volumes)
@@ -22,13 +27,23 @@ dev-down: ## Stop containers (keep volumes)
 
 dev-reset: ## Wipe volumes and re-bootstrap
 	docker compose down -v
+	rm -rf deployments
 	$(MAKE) dev-up
 
-dev-trade: ## Place a smoke trade against local stack
+dev-deposit: ## Smoke deposit / withdraw / blocked-withdraw against local stack
+	pnpm tsx scripts/smoke-deposit.ts
+
+dev-trade: ## Place a smoke trade (Phase 3+)
 	pnpm tsx scripts/smoke-trade.ts
 
-dev-liquidate: ## Force-crash price and verify liquidation pipeline
+dev-liquidate: ## Force-crash price and verify liquidation pipeline (Phase 4+)
 	pnpm tsx scripts/smoke-liquidate.ts
+
+deploy-sepolia-dry: ## Simulate Sepolia deploy (no broadcast)
+	./scripts/deploy-sepolia.sh
+
+deploy-sepolia: ## BROADCAST to Arbitrum Sepolia (requires Sepolia ETH + env vars)
+	./scripts/deploy-sepolia.sh --broadcast
 
 dev-logs: ## Tail logs from all services
 	docker compose logs -f
