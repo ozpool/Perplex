@@ -2507,6 +2507,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "perplex-matching"
+version = "0.1.0"
+dependencies = [
+ "perplex-core",
+ "proptest",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "pest"
 version = "2.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

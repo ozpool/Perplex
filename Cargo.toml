@@ -3,9 +3,9 @@ resolver = "2"
 members = [
     "crates/perplex-core",
     "crates/perplex-diff-gen",
+    "crates/perplex-matching",
     # additional crates land in their respective phases:
-    #   "crates/perplex-settlement"  (Phase 2)
-    #   "crates/perplex-matching"    (Phase 3)
+    #   "crates/perplex-settlement"  (Phase 2 — handled by Solidity SettlementEngine for now)
     #   "crates/perplex-oracle"      (Phase 4)
     #   "crates/perplex-liquidator"  (Phase 4)
     #   "crates/perplex-funding"     (Phase 4)
