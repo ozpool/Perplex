@@ -146,7 +146,11 @@ fn main() {
     }
 
     let scenario_count = scenarios.len();
-    let fixture = Fixture { seed: SEED, scenario_count, scenarios };
+    let fixture = Fixture {
+        seed: SEED,
+        scenario_count,
+        scenarios,
+    };
     let json = serde_json::to_string_pretty(&fixture).expect("serialize");
     std::io::stdout()
         .write_all(json.as_bytes())

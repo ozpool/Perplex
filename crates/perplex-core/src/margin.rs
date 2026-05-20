@@ -205,7 +205,11 @@ mod tests {
     fn arb_size() -> impl Strategy<Value = Decimal> {
         (1i64..=100_000, prop::bool::ANY).prop_map(|(n, neg)| {
             let v = Decimal::new(n, 3);
-            if neg { -v } else { v }
+            if neg {
+                -v
+            } else {
+                v
+            }
         })
     }
 
