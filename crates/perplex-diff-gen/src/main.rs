@@ -23,7 +23,7 @@ use std::io::Write;
 /// Number of scenarios. Bumping to 1000 is feasible (~30s Solidity replay); we
 /// pick 500 as a balance between coverage and CI wall-clock.
 const SCENARIOS: usize = 500;
-const SEED: u64 = 0xC0FFEE_F00D_BEEFu64;
+const SEED: u64 = 0x00C0_FFEE_F00D_BEEF_u64;
 
 #[derive(Serialize)]
 struct Fixture {
