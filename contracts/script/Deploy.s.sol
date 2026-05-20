@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.24;
+
+import {Script, console2} from "forge-std/Script.sol";
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
+import {MockOracle} from "../src/MockOracle.sol";
+import {MarketRegistry} from "../src/MarketRegistry.sol";
+import {PositionRegistry} from "../src/PositionRegistry.sol";
+import {CollateralVault} from "../src/CollateralVault.sol";
+import {IMarketRegistry} from "../src/interfaces/IMarketRegistry.sol";
+import {IPositionRegistry} from "../src/interfaces/IPositionRegistry.sol";
+import {IOracleAdapter} from "../src/interfaces/IOracleAdapter.sol";
+import {ICollateralVault} from "../src/interfaces/ICollateralVault.sol";
+
+/// @notice Deterministic deploy for local anvil (chain id 31337). Writes addresses to
+///         contracts/deployments/anvil.json so scripts/seed.ts can consume them.
+contract Deploy is Script {
+    struct Deployments {
+        address mockUsdc;
+        address mockOracle;
+        address marketRegistry;
+        address positionRegistry;
+        address collateralVault;
+        address settlementEngine;
+        address liquidationEngine;
+        address owner;
+        uint256 chainId;
+    }
+
+    function run() external {
+        uint256 deployerPk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address deployer = vm.addr(deployerPk);
+
+        // For local devnet the deployer also fills the roles that production splits across
+        // a multisig, a settlement publisher hot key, and a liquidation hot key. Phase 4 wires
+        // real engine contracts; for Phase 1 we pin these to the deployer so applyFill can be
+        // smoke-tested from a known address.
+        address owner = deployer;
+        address settlement = deployer;
+        address liquidation = deployer;
+
+        vm.startBroadcast(deployerPk);
+
+        MockUSDC usdc = new MockUSDC();
+        MockOracle oracle = new MockOracle(owner);
+        MarketRegistry markets = new MarketRegistry(owner);
+        PositionRegistry positionRegistry =
+            new PositionRegistry(owner, IMarketRegistry(address(markets)), IOracleAdapter(address(oracle)));
+        CollateralVault vault = new CollateralVault(
+            IERC20(address(usdc)), IPositionRegistry(address(positionRegistry)), settlement, liquidation
+        );
+        positionRegistry.setWiring(ICollateralVault(address(vault)), settlement, liquidation);
+
+        _listMarkets(markets);
+        _seedPrices(oracle);
+
+        vm.stopBroadcast();
+
+        Deployments memory d = Deployments({
+            mockUsdc: address(usdc),
+            mockOracle: address(oracle),
+            marketRegistry: address(markets),
+            positionRegistry: address(positionRegistry),
+            collateralVault: address(vault),
+            settlementEngine: settlement,
+            liquidationEngine: liquidation,
+            owner: owner,
+            chainId: block.chainid
+        });
+
+        _writeDeployments(d);
+        _logDeployments(d);
+    }
+
+    function _listMarkets(MarketRegistry markets) internal {
+        // v1: BTC-USD, ETH-USD, SOL-USD. Risk params from PRD v1.1 section 11.
+        markets.listMarket(
+            keccak256("btc-usd"),
+            IPositionRegistry.MarketParams({
+                imRatioBps: 500,
+                mmRatioBps: 250,
+                liqBonusBps: 100,
+                takerFeeBps: 5,
+                makerRebateBps: -2,
+                active: true
+            })
+        );
+        markets.listMarket(
+            keccak256("eth-usd"),
+            IPositionRegistry.MarketParams({
+                imRatioBps: 500,
+                mmRatioBps: 250,
+                liqBonusBps: 100,
+                takerFeeBps: 5,
+                makerRebateBps: -2,
+                active: true
+            })
+        );
+        markets.listMarket(
+            keccak256("sol-usd"),
+            IPositionRegistry.MarketParams({
+                imRatioBps: 1_000,
+                mmRatioBps: 500,
+                liqBonusBps: 150,
+                takerFeeBps: 7,
+                makerRebateBps: -2,
+                active: true
+            })
+        );
+    }
+
+    function _seedPrices(MockOracle oracle) internal {
+        bytes32[] memory ids = new bytes32[](3);
+        uint256[] memory prices = new uint256[](3);
+        ids[0] = keccak256("btc-usd");
+        prices[0] = 100_000e18;
+        ids[1] = keccak256("eth-usd");
+        prices[1] = 3_500e18;
+        ids[2] = keccak256("sol-usd");
+        prices[2] = 200e18;
+        oracle.setPrices(ids, prices);
+    }
+
+    function _writeDeployments(Deployments memory d) internal {
+        string memory root = vm.projectRoot();
+        string memory dir = string.concat(root, "/deployments");
+        vm.createDir(dir, true);
+        string memory file = string.concat(dir, "/anvil.json");
+
+        string memory json = "deployments";
+        vm.serializeAddress(json, "MockUSDC", d.mockUsdc);
+        vm.serializeAddress(json, "MockOracle", d.mockOracle);
+        vm.serializeAddress(json, "MarketRegistry", d.marketRegistry);
+        vm.serializeAddress(json, "PositionRegistry", d.positionRegistry);
+        vm.serializeAddress(json, "CollateralVault", d.collateralVault);
+        vm.serializeAddress(json, "SettlementEngine", d.settlementEngine);
+        vm.serializeAddress(json, "LiquidationEngine", d.liquidationEngine);
+        vm.serializeAddress(json, "owner", d.owner);
+        string memory out = vm.serializeUint(json, "chainId", d.chainId);
+
+        vm.writeJson(out, file);
+    }
+
+    function _logDeployments(Deployments memory d) internal pure {
+        console2.log("MockUSDC         ", d.mockUsdc);
+        console2.log("MockOracle       ", d.mockOracle);
+        console2.log("MarketRegistry   ", d.marketRegistry);
+        console2.log("PositionRegistry ", d.positionRegistry);
+        console2.log("CollateralVault  ", d.collateralVault);
+    }
+}
