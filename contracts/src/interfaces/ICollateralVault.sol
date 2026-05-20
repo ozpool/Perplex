@@ -33,6 +33,12 @@ interface ICollateralVault {
         external
         returns (uint256 bonus, uint256 residual, uint256 shortfall);
 
+    /// @notice Debit `amount` USDC from `user` (capped at their balance) and transfer it to
+    ///         `recipient`. Returns the amount actually paid. Used by ADL to claw back the
+    ///         realised PnL from a deleveraged counterparty into the insurance fund.
+    /// @dev Only callable by LIQUIDATION_ENGINE.
+    function debitToExternal(address user, address recipient, uint256 amount) external returns (uint256 paid);
+
     function balances(address user) external view returns (uint256);
     function totalDeposits() external view returns (uint256);
 }

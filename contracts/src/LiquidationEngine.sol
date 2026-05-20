@@ -123,4 +123,45 @@ contract LiquidationEngine is ILiquidationEngine {
         if (newOwner == address(0)) revert ZeroAddress();
         owner = newOwner;
     }
+
+    /// @inheritdoc ILiquidationEngine
+    /// @dev Owner-gated. Off-chain ranker is trusted to pick the top profitable counterparties;
+    ///      on-chain we only enforce per-victim soundness (right side, profitable, size cap).
+    function adl(bytes32 marketId, address[] calldata victims, int256[] calldata closeSizes)
+        external
+        onlyOwner
+    {
+        if (victims.length != closeSizes.length) revert LengthMismatch();
+        if (!MARKETS.isMarketActive(marketId)) revert MarketInactive(marketId);
+        uint256 mark = ORACLE.priceX18(marketId);
+        for (uint256 i = 0; i < victims.length; ++i) {
+            _adlOne(marketId, mark, victims[i], closeSizes[i]);
+        }
+    }
+
+    function _adlOne(bytes32 marketId, uint256 mark, address victim, int256 closeSize) internal {
+        IPositionRegistry.Position memory p = POSITIONS.positions(victim, marketId);
+        if (p.size == 0 || closeSize == 0) revert NoPosition();
+        // closeSize must reduce the position: opposite sign of current size, |close| <= |size|.
+        if ((p.size > 0) == (closeSize > 0)) revert WrongSide();
+        if (SignedMath.abs(closeSize) > SignedMath.abs(p.size)) revert CloseExceedsPosition();
+        // Only profitable counterparties may be deleveraged. For a long: profitable if mark > entry.
+        // For a short: profitable if mark < entry.
+        bool longProfitable = p.size > 0 && mark > p.entryPriceX18;
+        bool shortProfitable = p.size < 0 && mark < p.entryPriceX18;
+        if (!(longProfitable || shortProfitable)) revert NotProfitable();
+
+        (int256 realised, int256 funding) = POSITIONS.applyFill(victim, marketId, closeSize, mark);
+        int256 settleX18 = realised + funding;
+        int256 settleUSDC = settleX18 / int256(USDC_TO_X18);
+        if (settleUSDC != 0) {
+            VAULT.applySettlement(victim, settleUSDC);
+        }
+
+        // Claw back the realised gain into the insurance fund. Only positive realised PnL is
+        // taken; the funding portion stays with the user.
+        uint256 take = realised > 0 ? uint256(realised / int256(USDC_TO_X18)) : 0;
+        uint256 paid = take == 0 ? 0 : VAULT.debitToExternal(victim, address(FUND), take);
+        emit AdlExecuted(marketId, victim, closeSize, paid);
+    }
 }
