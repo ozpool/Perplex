@@ -10,6 +10,7 @@ import {MockOracle} from "../src/MockOracle.sol";
 import {MarketRegistry} from "../src/MarketRegistry.sol";
 import {PositionRegistry} from "../src/PositionRegistry.sol";
 import {CollateralVault} from "../src/CollateralVault.sol";
+import {SettlementEngine} from "../src/SettlementEngine.sol";
 import {IMarketRegistry} from "../src/interfaces/IMarketRegistry.sol";
 import {IPositionRegistry} from "../src/interfaces/IPositionRegistry.sol";
 import {IOracleAdapter} from "../src/interfaces/IOracleAdapter.sol";
@@ -34,12 +35,11 @@ contract Deploy is Script {
         uint256 deployerPk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPk);
 
-        // For local devnet the deployer also fills the roles that production splits across
-        // a multisig, a settlement publisher hot key, and a liquidation hot key. Phase 4 wires
-        // real engine contracts; for Phase 1 we pin these to the deployer so applyFill can be
-        // smoke-tested from a known address.
+        // For local devnet the deployer fills owner and operator (matching engine hot key).
+        // Phase 4 wires a real LiquidationEngine contract; for now we pin the liquidation role
+        // to the deployer so test scripts can call applyFill via that path if needed.
         address owner = deployer;
-        address settlement = deployer;
+        address operator = deployer;
         address liquidation = deployer;
 
         vm.startBroadcast(deployerPk);
@@ -49,10 +49,22 @@ contract Deploy is Script {
         MarketRegistry markets = new MarketRegistry(owner);
         PositionRegistry positionRegistry =
             new PositionRegistry(owner, IMarketRegistry(address(markets)), IOracleAdapter(address(oracle)));
+
+        // SettlementEngine is deployed two steps after the vault, so its address is computed
+        // ahead of time via CREATE nonce arithmetic and passed into the vault constructor.
+        // After deploying the engine we verify the predicted address matches.
+        uint64 nonce = vm.getNonce(deployer);
+        address futureEngine = vm.computeCreateAddress(deployer, nonce + 1);
+
         CollateralVault vault = new CollateralVault(
-            IERC20(address(usdc)), IPositionRegistry(address(positionRegistry)), settlement, liquidation
+            IERC20(address(usdc)), IPositionRegistry(address(positionRegistry)), futureEngine, liquidation
         );
-        positionRegistry.setWiring(ICollateralVault(address(vault)), settlement, liquidation);
+        SettlementEngine engine = new SettlementEngine(
+            owner, operator, IPositionRegistry(address(positionRegistry)), ICollateralVault(address(vault))
+        );
+        require(address(engine) == futureEngine, "engine address mismatch");
+
+        positionRegistry.setWiring(ICollateralVault(address(vault)), address(engine), liquidation);
 
         _listMarkets(markets);
         _seedPrices(oracle);
@@ -65,7 +77,7 @@ contract Deploy is Script {
             marketRegistry: address(markets),
             positionRegistry: address(positionRegistry),
             collateralVault: address(vault),
-            settlementEngine: settlement,
+            settlementEngine: address(engine),
             liquidationEngine: liquidation,
             owner: owner,
             chainId: block.chainid
@@ -150,5 +162,6 @@ contract Deploy is Script {
         console2.log("MarketRegistry   ", d.marketRegistry);
         console2.log("PositionRegistry ", d.positionRegistry);
         console2.log("CollateralVault  ", d.collateralVault);
+        console2.log("SettlementEngine ", d.settlementEngine);
     }
 }

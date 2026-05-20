@@ -1,12 +1,12 @@
 /**
- * Phase 1 smoke — deposit / withdraw end-to-end against local devnet.
+ * Phase 1+2 smoke — deposit / withdraw end-to-end against local devnet.
  *
  * Asserts:
  *   1. Mint + approve + deposit increments vault balance.
  *   2. Withdraw decrements vault balance and returns USDC to wallet.
- *   3. After a settlement engine fill via applyFill, withdraw is blocked
- *      (because the Phase 1 isWithdrawSafe stub returns false for any user
- *      with a touched market — Phase 2 implements the real formula).
+ *   3. After a fill submitted via SettlementEngine.applyBatch (EIP-712 signed by
+ *      the operator), a subsequent withdraw is blocked because the open position's
+ *      initial margin exceeds the remaining free collateral.
  *
  * Exit 0 = all assertions pass. Non-zero = abort.
  */
@@ -15,18 +15,20 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { loadAbi } from "./lib/abi.js";
 import { ANVIL_KEYS, loadDeployments, publicClient, walletClient } from "./lib/env.js";
+import { signBatch, type Fill } from "./lib/settlement.js";
 
 const deployments = loadDeployments("anvil");
 const usdcAbi = loadAbi("MockUSDC.sol", "MockUSDC");
 const vaultAbi = loadAbi("CollateralVault.sol", "CollateralVault");
-const registryAbi = loadAbi("PositionRegistry.sol", "PositionRegistry");
+const engineAbi = loadAbi("SettlementEngine.sol", "SettlementEngine");
 
 const pub = publicClient();
-const id = (s: string) => keccak256(toHex(s));
+const id = (s: string): Hex => keccak256(toHex(s));
 
 // Use an anvil key NOT seeded by scripts/seed.ts (which uses indices 1..5) so the
 // post-fill withdraw assertion isn't masked by pre-funded collateral.
 const DEPOSITOR_KEY: Hex = ANVIL_KEYS[9];
+const OPERATOR_KEY: Hex = ANVIL_KEYS[0]; // Deploy.s.sol sets operator = deployer.
 
 function assert(cond: boolean, msg: string): asserts cond {
   if (!cond) {
@@ -56,8 +58,8 @@ async function balanceOfUSDC(user: Address): Promise<bigint> {
 async function main() {
   const acct = privateKeyToAccount(DEPOSITOR_KEY);
   const trader = walletClient(DEPOSITOR_KEY);
-  const owner = walletClient(ANVIL_KEYS[0]);
-  const ownerAcct = privateKeyToAccount(ANVIL_KEYS[0]);
+  const operator = walletClient(OPERATOR_KEY);
+  const operatorAcct = privateKeyToAccount(OPERATOR_KEY);
 
   console.log(`smoke-deposit: depositor = ${acct.address}`);
 
@@ -128,14 +130,35 @@ async function main() {
   assert((await balanceOfUSDC(acct.address)) === usdcPre2 + WITHDRAW, "usdc balance did not increment by WITHDRAW");
   console.log(`  [2] withdraw OK (-${WITHDRAW})`);
 
-  // 3. Apply a fill via owner (Deploy.s.sol sets owner = settlementEngine = liquidationEngine in dev),
-  //    then attempt withdraw. Should revert with WithdrawalBlocked.
-  tx = await owner.writeContract({
-    address: deployments.PositionRegistry,
-    abi: registryAbi,
-    functionName: "applyFill",
-    args: [acct.address, id("btc-usd"), 1n * 10n ** 18n, 100_000n * 10n ** 18n],
-    account: ownerAcct,
+  // 3. Submit a one-fill batch through SettlementEngine: alice goes long 1 BTC at 100k.
+  //    Operator (= deployer) signs the EIP-712 typed-data batch.
+  const fills: Fill[] = [
+    {
+      user: acct.address,
+      marketId: id("btc-usd"),
+      sizeDelta: 1n * 10n ** 18n,
+      priceX18: 100_000n * 10n ** 18n,
+      fee: 0n,
+    },
+  ];
+  const nonce = BigInt(Math.floor(Date.now()));
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+
+  const signature = await signBatch({
+    operatorPk: OPERATOR_KEY,
+    chainId: deployments.chainId,
+    settlementEngine: deployments.SettlementEngine,
+    fills,
+    nonce,
+    deadline,
+  });
+
+  tx = await operator.writeContract({
+    address: deployments.SettlementEngine,
+    abi: engineAbi,
+    functionName: "applyBatch",
+    args: [fills, nonce, deadline, signature],
+    account: operatorAcct,
     chain: null,
   });
   await pub.waitForTransactionReceipt({ hash: tx });
@@ -155,7 +178,7 @@ async function main() {
     const msg = (e as Error).message ?? "";
     assert(msg.includes("WithdrawalBlocked"), `expected WithdrawalBlocked, got: ${msg.slice(0, 200)}`);
   }
-  assert(blocked, "expected withdraw to revert after applyFill, but it succeeded");
+  assert(blocked, "expected withdraw to revert after applyBatch, but it succeeded");
   console.log(`  [3] withdraw blocked after fill (WithdrawalBlocked) OK`);
 
   console.log("\nsmoke-deposit: PASS");
