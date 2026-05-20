@@ -111,4 +111,21 @@ contract CollateralVault is ICollateralVault, ReentrancyGuard {
 
         emit LiquidationSeize(user, liquidator, fund, bonus, residual, shortfall);
     }
+
+    /// @inheritdoc ICollateralVault
+    function debitToExternal(address user, address recipient, uint256 amount)
+        external
+        nonReentrant
+        returns (uint256 paid)
+    {
+        if (msg.sender != LIQUIDATION_ENGINE) revert UnauthorizedCaller();
+        if (recipient == address(0)) revert ZeroAddress();
+        uint256 bal = balances[user];
+        paid = amount > bal ? bal : amount;
+        if (paid == 0) return 0;
+        balances[user] = bal - paid;
+        totalDeposits -= paid;
+        USDC.safeTransfer(recipient, paid);
+        emit SettlementDebit(user, paid);
+    }
 }
