@@ -1,0 +1,241 @@
+{
+  "info": {
+    "_postman_id": "perplex-edge",
+    "name": "Perplex Edge API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "GET /v1/account/balance",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "account",
+            "balance"
+          ],
+          "raw": "{{baseUrl}}/v1/account/balance"
+        }
+      }
+    },
+    {
+      "name": "POST /v1/auth/siwe/nonce",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "POST",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "auth",
+            "siwe",
+            "nonce"
+          ],
+          "raw": "{{baseUrl}}/v1/auth/siwe/nonce"
+        }
+      }
+    },
+    {
+      "name": "POST /v1/auth/siwe/verify",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "POST",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "auth",
+            "siwe",
+            "verify"
+          ],
+          "raw": "{{baseUrl}}/v1/auth/siwe/verify"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/fills",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "fills"
+          ],
+          "raw": "{{baseUrl}}/v1/fills"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/funding/{marketId}",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "funding",
+            "{marketId}"
+          ],
+          "raw": "{{baseUrl}}/v1/funding/{marketId}"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/markets",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "markets"
+          ],
+          "raw": "{{baseUrl}}/v1/markets"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/orderbook/{marketId}",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "orderbook",
+            "{marketId}"
+          ],
+          "raw": "{{baseUrl}}/v1/orderbook/{marketId}"
+        }
+      }
+    },
+    {
+      "name": "POST /v1/orders",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "POST",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "orders"
+          ],
+          "raw": "{{baseUrl}}/v1/orders"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/orders/open",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "orders",
+            "open"
+          ],
+          "raw": "{{baseUrl}}/v1/orders/open"
+        }
+      }
+    },
+    {
+      "name": "DELETE /v1/orders/{orderId}",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "DELETE",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "orders",
+            "{orderId}"
+          ],
+          "raw": "{{baseUrl}}/v1/orders/{orderId}"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/positions",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "positions"
+          ],
+          "raw": "{{baseUrl}}/v1/positions"
+        }
+      }
+    },
+    {
+      "name": "GET /v1/trades/{marketId}",
+      "request": {
+        "description": null,
+        "header": [],
+        "method": "GET",
+        "url": {
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "trades",
+            "{marketId}"
+          ],
+          "raw": "{{baseUrl}}/v1/trades/{marketId}"
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    }
+  ]
+}
