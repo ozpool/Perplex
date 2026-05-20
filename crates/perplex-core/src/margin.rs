@@ -3,6 +3,7 @@
 //!
 //! See docs/margin-math.md for worked examples and derivations.
 
+use rust_decimal::prelude::Signed;
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -89,7 +90,11 @@ pub fn health_factor(
 /// Liquidation price for a single position. Returns None for zero size.
 /// Long:  P* = (size*entry - collateral) / (size * (1 - mmRatio))
 /// Short: P* = (size*entry + collateral) / (size * (1 + mmRatio))
-pub fn liquidation_price(p: &Position, collateral: Decimal, params: &MarketParams) -> Option<Decimal> {
+pub fn liquidation_price(
+    p: &Position,
+    collateral: Decimal,
+    params: &MarketParams,
+) -> Option<Decimal> {
     if p.size.is_zero() {
         return None;
     }
@@ -134,9 +139,15 @@ mod tests {
         assert_eq!(realised, Decimal::ZERO);
         assert_eq!(p.size, dec!(0.15));
         // (10000 + 4900) / 0.15 = 99333.333...
-        let expected = dec!(99333.3333333333333333333333333);
-        let diff = (p.entry_price - expected).abs();
-        assert!(diff < dec!(0.0000000001), "got {}", p.entry_price);
+        // Algebraic identity: entry * size == old_notional + add_notional
+        let total_notional = p.entry_price * p.size;
+        assert!(
+            (total_notional - dec!(14900)).abs() < dec!(0.0000000001),
+            "entry={} size={} notional={}",
+            p.entry_price,
+            p.size,
+            total_notional
+        );
     }
 
     #[test]
@@ -181,6 +192,10 @@ mod tests {
         };
         let liq = liquidation_price(&p, dec!(1500), &params).unwrap();
         // expected 87179.49 from docs/margin-math.md
-        assert!((liq - dec!(87179.487179487179)).abs() < dec!(0.01), "got {}", liq);
+        assert!(
+            (liq - dec!(87179.487179487179)).abs() < dec!(0.01),
+            "got {}",
+            liq
+        );
     }
 }

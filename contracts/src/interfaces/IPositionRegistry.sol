@@ -19,11 +19,7 @@ interface IPositionRegistry {
     }
 
     event FillApplied(
-        address indexed user,
-        bytes32 indexed marketId,
-        int256 sizeDelta,
-        uint256 priceX18,
-        int256 realisedPnl
+        address indexed user, bytes32 indexed marketId, int256 sizeDelta, uint256 priceX18, int256 realisedPnl
     );
 
     event FundingSettled(address indexed user, bytes32 indexed marketId, int256 fundingDelta);

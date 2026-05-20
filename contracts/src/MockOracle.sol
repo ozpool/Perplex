@@ -45,7 +45,10 @@ contract MockOracle is IOracleAdapter {
     }
 
     /// @dev Mock variant ignores updateData payload; on live deploys Pyth verifies signatures.
-    function updateAndGetPrice(bytes32 marketId, bytes[] calldata /*updateData*/ )
+    function updateAndGetPrice(
+        bytes32 marketId,
+        bytes[] calldata /*updateData*/
+    )
         external
         payable
         override

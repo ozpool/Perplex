@@ -2,14 +2,15 @@
 resolver = "2"
 members = [
     "crates/perplex-core",
-    "crates/perplex-matching",
-    "crates/perplex-edge",
-    "crates/perplex-settlement",
-    "crates/perplex-oracle",
-    "crates/perplex-liquidator",
-    "crates/perplex-funding",
-    "crates/perplex-cli",
-    "crates/perplex-mock-oracle",
+    # additional crates land in their respective phases:
+    #   "crates/perplex-settlement"  (Phase 2)
+    #   "crates/perplex-matching"    (Phase 3)
+    #   "crates/perplex-oracle"      (Phase 4)
+    #   "crates/perplex-liquidator"  (Phase 4)
+    #   "crates/perplex-funding"     (Phase 4)
+    #   "crates/perplex-edge"        (Phase 5)
+    #   "crates/perplex-cli"         (Phase 7)
+    #   "crates/perplex-mock-oracle" (added when HTTP stub is wired)
 ]
 
 [workspace.package]
