@@ -84,6 +84,22 @@ impl Orderbook {
         self.asks.keys().next().copied()
     }
 
+    /// Sum of remaining qty resting at `price` on `side`. Zero if the level is empty.
+    pub fn level_qty(&self, side: Side, price: Decimal) -> Decimal {
+        let queue = match side {
+            Side::Buy => self.bids.get(&Reverse(price)),
+            Side::Sell => self.asks.get(&price),
+        };
+        let Some(q) = queue else {
+            return Decimal::ZERO;
+        };
+        let mut total = Decimal::ZERO;
+        for o in q {
+            total += o.remaining;
+        }
+        total
+    }
+
     /// Submit a taker order. Returns the list of fills produced and whether the order
     /// rests on the book afterwards. Reduce-only checks consult `tracker` (which should
     /// reflect the user's current net position before this fill).
