@@ -77,4 +77,38 @@ contract CollateralVault is ICollateralVault, ReentrancyGuard {
             emit SettlementDebit(user, amt);
         }
     }
+
+    /// @inheritdoc ICollateralVault
+    /// @dev Atomic liquidation distribution. Drains the victim's USDC balance, hands
+    ///      `bonusAmount` (capped at balance) to the liquidator, and forwards the residual
+    ///      to the insurance fund via direct safeTransfer. When the victim's balance is
+    ///      below `bonusAmount` the returned `shortfall` is non-zero — callers covering it
+    ///      from the fund itself are LiquidationEngine's responsibility, not the vault's.
+    function seizeForLiquidation(address user, address liquidator, address fund, uint256 bonusAmount)
+        external
+        nonReentrant
+        returns (uint256 bonus, uint256 residual, uint256 shortfall)
+    {
+        if (msg.sender != LIQUIDATION_ENGINE) revert UnauthorizedCaller();
+        if (liquidator == address(0) || fund == address(0)) revert ZeroAddress();
+
+        uint256 userBal = balances[user];
+        balances[user] = 0;
+        totalDeposits -= userBal;
+
+        if (userBal >= bonusAmount) {
+            bonus = bonusAmount;
+            residual = userBal - bonusAmount;
+            shortfall = 0;
+        } else {
+            bonus = userBal;
+            residual = 0;
+            shortfall = bonusAmount - userBal;
+        }
+
+        if (bonus > 0) USDC.safeTransfer(liquidator, bonus);
+        if (residual > 0) USDC.safeTransfer(fund, residual);
+
+        emit LiquidationSeize(user, liquidator, fund, bonus, residual, shortfall);
+    }
 }
