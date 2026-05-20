@@ -35,8 +35,17 @@ contract MockRegistry is IPositionRegistry {
         return true;
     }
 
-    // unused stubs — full PositionRegistry lands in a later PR
-    function applyFill(address, bytes32, int256, uint256) external override {}
+    // unused stubs — full PositionRegistry lives in src/PositionRegistry.sol
+    function applyFill(address, bytes32, int256, uint256)
+        external
+        pure
+        override
+        returns (int256 realisedPnl, int256 fundingDelta)
+    {
+        return (0, 0);
+    }
+
+    function updateFunding(bytes32, int256) external override {}
 
     function unrealisedPnl(address, bytes32, uint256) external pure override returns (int256) {
         return 0;
@@ -44,6 +53,10 @@ contract MockRegistry is IPositionRegistry {
 
     function healthFactor(address, bytes32, uint256) external pure override returns (uint256) {
         return type(uint256).max;
+    }
+
+    function liquidationPrice(address, bytes32) external pure override returns (uint256) {
+        return 0;
     }
 
     function positions(address, bytes32) external pure override returns (Position memory p) {

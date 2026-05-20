@@ -24,7 +24,9 @@ const registryAbi = loadAbi("PositionRegistry.sol", "PositionRegistry");
 const pub = publicClient();
 const id = (s: string) => keccak256(toHex(s));
 
-const DEPOSITOR_KEY: Hex = ANVIL_KEYS[7] ?? ANVIL_KEYS[1]; // any unseeded wallet
+// Use an anvil key NOT seeded by scripts/seed.ts (which uses indices 1..5) so the
+// post-fill withdraw assertion isn't masked by pre-funded collateral.
+const DEPOSITOR_KEY: Hex = ANVIL_KEYS[9];
 
 function assert(cond: boolean, msg: string): asserts cond {
   if (!cond) {
