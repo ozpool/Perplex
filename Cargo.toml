@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/perplex-core",
+    "crates/perplex-matching",
+    "crates/perplex-edge",
+    "crates/perplex-settlement",
+    "crates/perplex-oracle",
+    "crates/perplex-liquidator",
+    "crates/perplex-funding",
+    "crates/perplex-cli",
+    "crates/perplex-mock-oracle",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "BUSL-1.1"
+repository = "https://github.com/ozpool/Perplex"
+authors = ["ozpool"]
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+axum = "0.7"
+tokio-tungstenite = "0.23"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+hyper = "1"
+redis = { version = "0.27", features = ["tokio-comp", "streams"] }
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "macros", "chrono", "rust_decimal"] }
+alloy = { version = "0.8", features = ["full", "node-bindings"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rust_decimal = { version = "1.36", features = ["serde-with-str"] }
+rust_decimal_macros = "1.36"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+reqwest = { version = "0.12", features = ["json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.bench]
+debug = true

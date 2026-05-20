@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    container_name: perplex-anvil
+    command: >
+      anvil
+      --host 0.0.0.0
+      --block-time 1
+      --accounts 10
+      --balance 1000
+      --chain-id 31337
+      --mnemonic "test test test test test test test test test test test junk"
+    ports:
+      - "8545:8545"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: perplex-postgres
+    environment:
+      POSTGRES_USER: perplex
+      POSTGRES_PASSWORD: perplex
+      POSTGRES_DB: perplex
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perplex -d perplex"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: perplex-redis
+    command: redis-server --appendonly yes --save ""
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+
+  mock-pyth:
+    build:
+      context: ./crates/perplex-mock-oracle
+      dockerfile: Dockerfile
+    container_name: perplex-mock-pyth
+    ports:
+      - "8546:8546"
+    environment:
+      RUST_LOG: info
+
+volumes:
+  pgdata:
+  redisdata:
