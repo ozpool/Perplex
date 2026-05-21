@@ -1,0 +1,10 @@
+packages:
+  - 'web'
+  - 'sdk/typescript'
+
+onlyBuiltDependencies:
+  - sharp
+  - unrs-resolver
+  - msw
+  - '@reown/appkit'
+  - esbuild
