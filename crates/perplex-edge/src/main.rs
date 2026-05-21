@@ -43,6 +43,10 @@ async fn main() -> anyhow::Result<()> {
     let addr: SocketAddr = args.bind.parse()?;
     tracing::info!(%addr, ws = %ws_addr, "perplex-edge listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
