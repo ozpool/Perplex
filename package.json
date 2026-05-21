@@ -11,7 +11,12 @@
     "seed": "tsx scripts/seed.ts",
     "smoke:trade": "tsx scripts/smoke-trade.ts",
     "smoke:liquidate": "tsx scripts/smoke-liquidate.ts",
-    "smoke:deposit": "tsx scripts/smoke-deposit.ts"
+    "smoke:deposit": "tsx scripts/smoke-deposit.ts",
+    "web:dev": "pnpm --filter perplex-fe dev",
+    "web:dev:real": "pnpm --filter perplex-fe dev:real",
+    "web:build": "pnpm --filter perplex-fe build",
+    "web:lint": "pnpm --filter perplex-fe lint",
+    "web:typecheck": "pnpm --filter perplex-fe typecheck"
   },
   "dependencies": {
     "viem": "^2.21.0"

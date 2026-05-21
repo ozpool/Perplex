@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light;
+
+  /* Surfaces — light lavender → white panels */
+  --bg-0: #f6f4fb;
+  --bg-1: #ffffff;
+  --bg-2: #f1eff6;
+  --bg-3: #e8e4ef;
+  --bg-hover: #ece8f3;
+
+  /* Borders — translucent navy so they sit cleanly on white + soft-grey panels */
+  --border: rgba(15, 8, 52, 0.10);
+  --border-strong: rgba(15, 8, 52, 0.18);
+  --border-accent: rgba(15, 8, 52, 0.30);
+
+  /* Foreground — dark navy ladder */
+  --fg: #0c0530;
+  --fg-mid: #3d3656;
+  --fg-muted: #736b8a;
+  --fg-dim: #b1abc4;
+
+  /* Long / short — slightly darker than dark-theme so they hold contrast on white */
+  --long: #0fa56a;
+  --long-strong: #0a8a57;
+  --long-soft: rgba(15, 165, 106, 0.13);
+  --long-soft-strong: rgba(15, 165, 106, 0.22);
+
+  --short: #d63044;
+  --short-strong: #b32034;
+  --short-soft: rgba(214, 48, 68, 0.12);
+  --short-soft-strong: rgba(214, 48, 68, 0.22);
+
+  --warn: #d97706;
+  --warn-soft: rgba(217, 119, 6, 0.14);
+
+  /* Brand orange */
+  --accent: #ff6b1a;
+  --accent-strong: #d9531d;
+  --accent-soft: rgba(255, 107, 26, 0.14);
+
+  --info: #1e7adb;
+  --info-soft: rgba(30, 122, 219, 0.14);
+
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 0 0 1px var(--border);
+  --shadow-elev-1: 0 2px 8px rgba(15, 8, 52, 0.08);
+  --shadow-elev-2: 0 12px 32px -8px rgba(15, 8, 52, 0.22);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), ui-monospace, "JetBrains Mono", "IBM Plex Mono", monospace;
+
+  --topbar-h: 56px;
+  --mobile-tab-h: 60px;
+}
