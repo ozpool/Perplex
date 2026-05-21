@@ -1,7 +1,8 @@
 "use client";
-import { useAccount, useConnect, useDisconnect, useChainId } from "wagmi";
-import { useState } from "react";
-import { Button } from "@/components/ui/Button";
+import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain } from "wagmi";
+import { useEffect, useState } from "react";
+import { APP_CHAINS, IS_DEV_PROFILE } from "@/lib/wallet/wagmi-config";
+import { useSiwe } from "@/lib/wallet/siwe";
 import { cn } from "@/lib/cn";
 
 function shortAddr(a: string): string {
@@ -9,7 +10,6 @@ function shortAddr(a: string): string {
 }
 
 const CHAIN_LABEL: Record<number, string> = {
-  1: "Ethereum",
   42161: "Arbitrum",
   421614: "Arb Sepolia",
   31337: "Anvil",
@@ -28,7 +28,16 @@ export function WalletButton() {
   const { connectors, connect, isPending } = useConnect();
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const { hasJwt, isSigning, error: siweError, signIn, signOut } = useSiwe();
   const [open, setOpen] = useState(false);
+
+  // Auto-prompt SIWE once the wallet connects and we don't yet have a JWT.
+  useEffect(() => {
+    if (status === "connected" && address && !hasJwt && !isSigning) {
+      signIn().catch(() => void 0);
+    }
+  }, [status, address, hasJwt, isSigning, signIn]);
 
   if (status === "connected" && address) {
     return (
@@ -66,7 +75,46 @@ export function WalletButton() {
                   </div>
                 </div>
               </div>
+              {IS_DEV_PROFILE && (
+                <div className="pt-3 pb-2 border-b border-border">
+                  <div className="px-1 pb-1.5 text-[10px] font-mono uppercase tracking-[0.16em] text-fg-muted">
+                    Network (dev)
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    {APP_CHAINS.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => switchChain({ chainId: c.id })}
+                        className={cn(
+                          "flex items-center justify-between h-8 px-2 rounded-[var(--radius-sm)] text-[12px] transition-colors",
+                          c.id === chainId
+                            ? "bg-bg-2 text-fg"
+                            : "text-fg-mid hover:bg-bg-hover hover:text-fg",
+                        )}
+                      >
+                        <span>{CHAIN_LABEL[c.id] ?? c.name}</span>
+                        {c.id === chainId && <span className="size-1.5 rounded-full bg-long" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="pt-2 flex flex-col gap-1">
+                {!hasJwt && (
+                  <button
+                    onClick={() => {
+                      signIn();
+                    }}
+                    disabled={isSigning}
+                    className="flex items-center gap-2.5 h-9 px-2 rounded-[var(--radius-sm)] text-sm text-accent hover:bg-bg-hover transition-colors disabled:opacity-60"
+                  >
+                    <KeyIcon />
+                    {isSigning ? "Awaiting signature…" : "Sign in (SIWE)"}
+                  </button>
+                )}
+                {siweError && (
+                  <div className="px-2 pb-1 text-[11px] text-short font-mono break-all">{siweError}</div>
+                )}
                 <button
                   onClick={() => {
                     navigator.clipboard?.writeText(address);
@@ -88,6 +136,7 @@ export function WalletButton() {
                 </a>
                 <button
                   onClick={() => {
+                    signOut();
                     disconnect();
                     setOpen(false);
                   }}
@@ -172,6 +221,16 @@ function ChevronRightIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
       <path d="M9 6l6 6-6 6" />
+    </svg>
+  );
+}
+function KeyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="15" r="3.5" />
+      <path d="M10 12l9-9" />
+      <path d="M16 6l3 3" />
+      <path d="M13 9l2 2" />
     </svg>
   );
 }
