@@ -3046,6 +3046,7 @@ dependencies = [
  "parking_lot",
  "perplex-core",
  "perplex-matching",
+ "redis",
  "reqwest",
  "rust_decimal",
  "serde",

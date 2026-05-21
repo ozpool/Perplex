@@ -1,3 +1,4 @@
+use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
@@ -7,15 +8,20 @@ use utoipa_swagger_ui::SwaggerUi;
 
 use crate::handlers;
 use crate::openapi::ApiDoc;
+use crate::ratelimit::{rate_limit_layer, RateLimiter};
 use crate::state::AppState;
 
 pub fn build_router(state: AppState) -> Router {
+    build_router_with_limiter(state, RateLimiter::in_memory())
+}
+
+pub fn build_router_with_limiter(state: AppState, limiter: RateLimiter) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
+    let api = Router::new()
         .route("/v1/markets", get(handlers::list_markets))
         .route("/v1/orderbook/:market_id", get(handlers::get_orderbook))
         .route("/v1/trades/:market_id", get(handlers::get_trades))
@@ -28,10 +34,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/auth/siwe/nonce", post(handlers::siwe_nonce))
         .route("/v1/auth/siwe/verify", post(handlers::siwe_verify))
         .route("/v1/account/balance", get(handlers::get_balance))
-        .merge(SwaggerUi::new("/docs").url("/docs/openapi.json", ApiDoc::openapi()))
+        .layer(from_fn_with_state(
+            (state.clone(), limiter),
+            rate_limit_layer,
+        ))
+        .with_state(state.clone());
+
+    api.merge(SwaggerUi::new("/docs").url("/docs/openapi.json", ApiDoc::openapi()))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(state)
 }
 
 /// Dev-only router that exposes a `GET /__dev/token/:address` helper for E2E tests so they

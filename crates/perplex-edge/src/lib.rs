@@ -10,6 +10,7 @@ pub mod auth;
 pub mod error;
 pub mod handlers;
 pub mod openapi;
+pub mod ratelimit;
 pub mod router;
 pub mod session;
 pub mod state;

@@ -20,7 +20,12 @@ async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let handle = tokio::spawn(async move {
-        axum::serve(listener, router).await.unwrap();
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
     // give the listener a tick to settle
     tokio::time::sleep(Duration::from_millis(50)).await;
