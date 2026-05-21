@@ -152,3 +152,13 @@ export function getWsClient(): PerplexWs {
   }
   return singleton;
 }
+
+/**
+ * Mirror the persisted JWT into the live WS singleton. The token must be in
+ * the query string at connect time (the user channels are gated by it), so a
+ * change forces a reconnect.
+ */
+export function syncWsToken(token: string | null) {
+  if (!singleton) return;
+  singleton.setToken(token);
+}

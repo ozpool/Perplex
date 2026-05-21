@@ -40,6 +40,35 @@ export function useLiveOrderbook(marketId: MarketId): LiveOrderbook | null {
     asksRef.current = new Map();
     seqRef.current = 0;
 
+    // Coalesce setState into one rAF tick so a burst of deltas can't trigger
+    // a render per message. Even with a 50-level book the sort+slice is cheap,
+    // but React reconciliation + Orderbook's useMemo cost dominates — keeping
+    // them on the paint cadence keeps repaints comfortably under the 16ms
+    // budget called out in #39.
+    let lastTsNs = "0";
+    let rafScheduled = false;
+    const flush = () => {
+      rafScheduled = false;
+      const sortedBids = Array.from(bidsRef.current.entries())
+        .sort((a, b) => Number(b[0]) - Number(a[0]))
+        .slice(0, 25) as OrderbookLevel[];
+      const sortedAsks = Array.from(asksRef.current.entries())
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .slice(0, 25) as OrderbookLevel[];
+      setState({ bids: sortedBids, asks: sortedAsks, sequence: seqRef.current, tsNs: lastTsNs });
+    };
+    const scheduleFlush = (tsNs: string) => {
+      lastTsNs = tsNs;
+      if (rafScheduled) return;
+      rafScheduled = true;
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(flush);
+      } else {
+        // SSR / test runners — fall back to a microtask.
+        queueMicrotask(flush);
+      }
+    };
+
     const off = ws.on((m: WsMessage) => {
       if (!("channel" in m) || m.channel !== channel) return;
       if (m.type === "snapshot") {
@@ -60,13 +89,7 @@ export function useLiveOrderbook(marketId: MarketId): LiveOrderbook | null {
       } else {
         return;
       }
-      const sortedBids = Array.from(bidsRef.current.entries())
-        .sort((a, b) => Number(b[0]) - Number(a[0]))
-        .slice(0, 25) as OrderbookLevel[];
-      const sortedAsks = Array.from(asksRef.current.entries())
-        .sort((a, b) => Number(a[0]) - Number(b[0]))
-        .slice(0, 25) as OrderbookLevel[];
-      setState({ bids: sortedBids, asks: sortedAsks, sequence: seqRef.current, tsNs: m.tsNs });
+      scheduleFlush(m.tsNs);
     });
 
     ws.subscribe(channel);
