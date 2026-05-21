@@ -1,6 +1,6 @@
 "use client";
 import { http, createConfig, cookieStorage, createStorage } from "wagmi";
-import { mainnet, arbitrum, arbitrumSepolia } from "wagmi/chains";
+import { arbitrum, arbitrumSepolia } from "wagmi/chains";
 import { defineChain } from "viem";
 import { injected, walletConnect, coinbaseWallet } from "wagmi/connectors";
 
@@ -14,6 +14,20 @@ export const localAnvil = defineChain({
 
 const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "perplex-dev-placeholder";
 const isBrowser = typeof window !== "undefined";
+
+/**
+ * Anvil is exposed only outside production so a deployed prod build cannot
+ * accidentally talk to a developer's local fork. Dev profile = NODE_ENV !== "production".
+ */
+export const IS_DEV_PROFILE = process.env.NODE_ENV !== "production";
+
+const PROD_CHAINS = [arbitrum, arbitrumSepolia] as const;
+const DEV_CHAINS = [arbitrum, arbitrumSepolia, localAnvil] as const;
+
+export const APP_CHAINS = (IS_DEV_PROFILE ? DEV_CHAINS : PROD_CHAINS) as readonly [
+  (typeof DEV_CHAINS)[number],
+  ...(typeof DEV_CHAINS)[number][],
+];
 
 export function buildWagmiConfig() {
   const connectors = [
@@ -38,19 +52,22 @@ export function buildWagmiConfig() {
     );
   }
 
+  const transports: Record<number, ReturnType<typeof http>> = {
+    [arbitrum.id]: http(),
+    [arbitrumSepolia.id]: http(),
+  };
+  if (IS_DEV_PROFILE) {
+    transports[localAnvil.id] = http();
+  }
+
   return createConfig({
-    chains: [mainnet, arbitrum, arbitrumSepolia, localAnvil],
+    chains: APP_CHAINS,
     ssr: true,
     multiInjectedProviderDiscovery: true,
     storage: createStorage({ storage: cookieStorage }),
     connectors,
-    transports: {
-      [mainnet.id]: http(),
-      [arbitrum.id]: http(),
-      [arbitrumSepolia.id]: http(),
-      [localAnvil.id]: http(),
-    },
+    transports,
   });
 }
 
-export type AppChainId = 1 | 42161 | 421614 | 31337;
+export type AppChainId = 42161 | 421614 | 31337;
