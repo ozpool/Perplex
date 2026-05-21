@@ -1,8 +1,9 @@
 "use client";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useAccount, useChainId, useSignMessage } from "wagmi";
 import { SiweMessage } from "siwe";
 import { api } from "@/lib/api/rest";
+import { syncWsToken } from "@/lib/ws/client";
 
 const JWT_KEY = "perplex.jwt";
 const JWT_EXP_KEY = "perplex.jwt.expiresAt";
@@ -86,6 +87,13 @@ export function useSiwe(): SiweState {
   const expiresAt = stored?.expiresAt ?? null;
   const [isSigning, setIsSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the WS singleton's token aligned with the persisted JWT. setToken
+  // closes the current socket and forces a reconnect with the new token in
+  // the query string — that's how the edge gates user.* channels.
+  useEffect(() => {
+    syncWsToken(stored?.jwt ?? null);
+  }, [stored?.jwt]);
 
   const signIn = useCallback(async () => {
     if (!address) {
