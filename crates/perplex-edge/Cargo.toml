@@ -11,6 +11,9 @@ perplex-matching = { path = "../perplex-matching" }
 async-trait = "0.1"
 axum = { workspace = true }
 futures-util = "0.3"
+hex = "0.4"
+k256 = { version = "0.13", features = ["ecdsa"] }
+sha3 = "0.10"
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tower = { workspace = true }
