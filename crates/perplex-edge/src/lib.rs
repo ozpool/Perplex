@@ -11,6 +11,7 @@ pub mod error;
 pub mod handlers;
 pub mod openapi;
 pub mod router;
+pub mod session;
 pub mod state;
 pub mod types;
 pub mod ws;
