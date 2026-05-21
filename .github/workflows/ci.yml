@@ -113,6 +113,47 @@ jobs:
       - name: smoke liquidate (Phase 4 stub)
         run: make dev-liquidate
 
+      # ---- Playwright E2E (Phase 6 acceptance issue #41) -----------------
+      # Spins up perplex-edge against the in-memory state, builds the FE,
+      # then runs the browser test. continue-on-error stays on until we
+      # land the matching-engine book seeder; the underlying scaffolding
+      # is still useful (and gets run on every PR) right now.
+      - name: build perplex-edge
+        continue-on-error: true
+        run: cargo build --release -p perplex-edge
+
+      - name: launch perplex-edge
+        continue-on-error: true
+        run: |
+          PERPLEX_JWT_SECRET=e2e-test-secret \
+            ./target/release/perplex-edge \
+            --bind 127.0.0.1:8080 \
+            --ws-bind 127.0.0.1:8081 \
+            > edge.log 2>&1 &
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            curl -sf http://127.0.0.1:8080/v1/markets && break
+            sleep 1
+          done
+
+      - name: install playwright browsers
+        continue-on-error: true
+        run: pnpm --filter perplex-fe e2e:install
+
+      - name: build web
+        continue-on-error: true
+        run: pnpm web:build
+
+      - name: playwright e2e
+        continue-on-error: true
+        run: pnpm --filter perplex-fe e2e
+
+      - name: upload edge log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-log
+          path: edge.log
+
       - name: docker logs on failure
         if: failure()
         run: docker compose logs
