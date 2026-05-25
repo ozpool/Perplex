@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use perplex_cli::{run_quote_agent, EdgeMarketsOracle, HttpEdgeClient, QuoteAgentConfig};
+use perplex_cli::{
+    run_quote_agent, EdgeMarketsOracle, EdgeRiskSource, HttpEdgeClient, QuoteAgentConfig,
+    StrategyParams,
+};
 use perplex_funding::RedisBackend;
 
 #[derive(Parser)]
@@ -47,9 +50,33 @@ struct QuoteArgs {
     /// Bearer JWT for the edge. Mint via `/__dev/token/<addr>` on devnet or your SIWE flow.
     #[arg(long, env = "PERPLEX_AGENT_BEARER")]
     bearer: String,
-    /// Half-spread in bps (applied to each side of mid).
+
+    // -- strategy --------------------------------------------------------------
+    /// Base spread in bps (applied symmetrically around skewed mid).
     #[arg(long, env = "PERPLEX_BASE_SPREAD_BPS", default_value_t = 10)]
     base_spread_bps: u32,
+    /// Inventory penalty (bps) added at `|inventory| == inventory_max`.
+    #[arg(long, env = "PERPLEX_INV_PENALTY_BPS", default_value_t = 20)]
+    inv_penalty_bps: u32,
+    /// Inventory magnitude (base-asset units) at which the inventory penalty saturates.
+    #[arg(long, env = "PERPLEX_INV_MAX", default_value_t = 100.0)]
+    inv_max: f64,
+    /// Inventory mid skew (bps) at `|inventory| == inventory_max`.
+    #[arg(long, env = "PERPLEX_INV_SKEW_BPS", default_value_t = 5)]
+    inv_skew_bps: u32,
+    /// Multiplier (bps per unit of realised log-return stdev) on the vol-penalty term.
+    #[arg(long, env = "PERPLEX_VOL_MULT_BPS", default_value_t = 1000)]
+    vol_mult_bps: u32,
+    /// Realised-vol window in seconds. PRD calls for 15 min (900s); short devnet runs can
+    /// use 60 to converge inside a smoke-test budget.
+    #[arg(long, env = "PERPLEX_VOL_WINDOW_SECS", default_value_t = 900)]
+    vol_window_secs: u64,
+    /// Kill threshold in USDC (positive). The agent stops quoting a market when its
+    /// realised PnL drops below `-kill_threshold_usdc`.
+    #[arg(long, env = "PERPLEX_KILL_THRESHOLD_USDC", default_value_t = 500.0)]
+    kill_threshold_usdc: f64,
+
+    // -- loop ------------------------------------------------------------------
     /// Quote size in base-asset units.
     #[arg(long, env = "PERPLEX_QUOTE_SIZE", default_value = "0.05")]
     quote_size: String,
@@ -90,8 +117,16 @@ async fn run_quote(args: QuoteArgs) -> Result<()> {
 
     let config = QuoteAgentConfig {
         markets: args.markets,
-        account: args.account,
-        base_spread_bps: args.base_spread_bps,
+        account: args.account.clone(),
+        strategy: StrategyParams {
+            base_spread_bps: args.base_spread_bps,
+            inv_penalty_bps_at_max: args.inv_penalty_bps,
+            inv_max: args.inv_max,
+            vol_mult_bps: args.vol_mult_bps,
+            inv_skew_bps_at_max: args.inv_skew_bps,
+        },
+        vol_window: Duration::from_secs(args.vol_window_secs),
+        kill_threshold_usdc: args.kill_threshold_usdc,
         quote_size: args.quote_size,
         poll_interval: Duration::from_millis(args.poll_interval_ms),
         lease_ttl: Duration::from_secs(args.lease_ttl_secs),
@@ -101,10 +136,11 @@ async fn run_quote(args: QuoteArgs) -> Result<()> {
 
     let edge = HttpEdgeClient::new(&args.edge_url, &args.bearer);
     let oracle = EdgeMarketsOracle::new(&args.edge_url);
+    let risk = EdgeRiskSource::new(&args.edge_url, &args.bearer);
     let lease = RedisBackend::new(&args.redis_url)
         .with_context(|| format!("init redis at {}", args.redis_url))?;
 
-    run_quote_agent(config, lease, edge, oracle).await
+    run_quote_agent(config, lease, edge, oracle, risk).await
 }
 
 /// Pad the signature flag out to the 132-character minimum the edge enforces (66 bytes hex
