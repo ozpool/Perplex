@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 
 use clap::Parser;
 use perplex_edge::ws::{serve_ws, Hub, WsConfig};
-use perplex_edge::{build_router, AppState};
+use perplex_edge::{build_router, build_router_with_dev_token, AppState};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -19,6 +19,12 @@ struct Args {
     /// JWT signing secret. In dev a generated ULID is fine; production MUST inject from a secret store.
     #[arg(long, env = "PERPLEX_JWT_SECRET")]
     jwt_secret: Option<String>,
+
+    /// Expose `GET /__dev/token/:address` for local E2E (mints a JWT without a wallet
+    /// signature). Defaults to on in debug builds, off in release. Override with
+    /// `--dev-routes=true|false` or `PERPLEX_DEV_ROUTES=1|0`.
+    #[arg(long, env = "PERPLEX_DEV_ROUTES", default_value_t = cfg!(debug_assertions))]
+    dev_routes: bool,
 }
 
 #[tokio::main]
@@ -35,13 +41,18 @@ async fn main() -> anyhow::Result<()> {
         .into_bytes();
     let state = AppState::new(secret);
     let hub = Hub::new();
-    let app = build_router(state.clone());
+    let app = if args.dev_routes {
+        tracing::warn!("dev routes enabled: GET /__dev/token/:address is exposed");
+        build_router_with_dev_token(state.clone())
+    } else {
+        build_router(state.clone())
+    };
 
     let ws_addr: SocketAddr = args.ws_bind.parse()?;
     let _ws_handle = serve_ws(state, hub, WsConfig { bind: ws_addr }).await?;
 
     let addr: SocketAddr = args.bind.parse()?;
-    tracing::info!(%addr, ws = %ws_addr, "perplex-edge listening");
+    tracing::info!(%addr, ws = %ws_addr, dev_routes = args.dev_routes, "perplex-edge listening");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(
         listener,
