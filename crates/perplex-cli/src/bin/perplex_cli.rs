@@ -2,10 +2,12 @@
 //! synthetic-counterparty maker. Configuration is via CLI flags + env so the same binary
 //! works under systemd / docker without a separate config file.
 
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
+use perplex_cli::metrics as cp_metrics;
 use perplex_cli::{
     run_quote_agent, EdgeMarketsOracle, EdgeRiskSource, HttpEdgeClient, QuoteAgentConfig,
     StrategyParams,
@@ -92,6 +94,9 @@ struct QuoteArgs {
     /// Dev signature padding accepted by the edge. Replaced by EIP-712 signing in prod.
     #[arg(long, env = "PERPLEX_ORDER_SIGNATURE", default_value = "0x00")]
     order_signature: String,
+    /// Prometheus exporter bind address (host:port). Empty to disable.
+    #[arg(long, env = "PERPLEX_METRICS_BIND", default_value = "0.0.0.0:9100")]
+    metrics_bind: String,
 }
 
 #[tokio::main]
@@ -113,6 +118,16 @@ async fn run_quote(args: QuoteArgs) -> Result<()> {
     if args.markets.is_empty() {
         return Err(anyhow!("--markets must list at least one market"));
     }
+
+    if !args.metrics_bind.is_empty() {
+        let bind: SocketAddr = args
+            .metrics_bind
+            .parse()
+            .with_context(|| format!("parse --metrics-bind {}", args.metrics_bind))?;
+        cp_metrics::install_exporter(bind)?;
+        tracing::info!(%bind, "prometheus exporter listening");
+    }
+
     let signature = expand_signature(&args.order_signature);
 
     let config = QuoteAgentConfig {

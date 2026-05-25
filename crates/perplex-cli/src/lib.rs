@@ -6,6 +6,7 @@
 
 pub mod edge;
 pub mod kill;
+pub mod metrics;
 pub mod oracle;
 pub mod quote;
 pub mod risk;

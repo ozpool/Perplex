@@ -1,4 +1,4 @@
-.PHONY: help install dev-up dev-down dev-reset dev-deposit dev-trade dev-liquidate sim-replay dev-logs deploy-sepolia-dry deploy-sepolia build test test-contracts test-rust lint fmt clean
+.PHONY: help install dev-up dev-down dev-reset dev-deposit dev-trade dev-liquidate sim-replay smoke-grafana metrics-up metrics-down dev-logs deploy-sepolia-dry deploy-sepolia build test test-contracts test-rust lint fmt clean
 # Default anvil deployer key. Override per-env when deploying to Sepolia / mainnet.
 DEPLOYER_PRIVATE_KEY ?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -41,6 +41,15 @@ dev-liquidate: ## Force-crash price and verify liquidation pipeline (Phase 4+)
 
 sim-replay: ## 30-day synthetic CEX-tape replay against the counterparty agent
 	pnpm tsx scripts/replay-binance.ts
+
+smoke-grafana: ## Validate infra/grafana/counterparty.json wire-up against agent metrics
+	pnpm tsx scripts/smoke-grafana.ts
+
+metrics-up: ## Launch local Prometheus + Grafana scraping the counterparty agent
+	docker compose -f infra/docker-compose.metrics.yml up -d
+
+metrics-down: ## Stop Prometheus + Grafana stack
+	docker compose -f infra/docker-compose.metrics.yml down
 
 deploy-sepolia-dry: ## Simulate Sepolia deploy (no broadcast)
 	./scripts/deploy-sepolia.sh

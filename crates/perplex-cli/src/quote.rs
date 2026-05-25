@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 
 use crate::edge::{EdgeClient, PlaceOrderRequest};
 use crate::kill::KillSwitch;
+use crate::metrics;
 use crate::oracle::OracleSource;
 use crate::risk::RiskSource;
 use crate::strategy::{Quotes, StrategyParams};
@@ -71,6 +72,7 @@ pub(crate) struct MarketState {
     pub bid_order_id: Option<String>,
     pub ask_order_id: Option<String>,
     pub last_mid: Option<f64>,
+    pub last_inventory: Option<f64>,
     pub vol: VolWindow,
 }
 
@@ -80,6 +82,7 @@ impl MarketState {
             bid_order_id: None,
             ask_order_id: None,
             last_mid: None,
+            last_inventory: None,
             vol: VolWindow::new(vol_window),
         }
     }
@@ -113,7 +116,28 @@ where
     let mut guard = state.lock().await;
     guard.vol.record(Instant::now(), mid);
 
+    metrics::set_realised_pnl(market_id, market_risk.realised_pnl_usdc);
+    metrics::set_inventory(market_id, market_risk.inventory);
+
+    let quote_size = config.quote_size.parse::<f64>().unwrap_or(0.0);
+    if let Some(prev) = guard.last_inventory {
+        let delta = (market_risk.inventory - prev).abs();
+        if delta > 1e-12 {
+            let fills = if quote_size > 0.0 {
+                (delta / quote_size).round().max(1.0) as u64
+            } else {
+                1
+            };
+            metrics::record_fill(market_id, fills);
+        }
+    }
+    guard.last_inventory = Some(market_risk.inventory);
+
+    let kill_was_tripped = kill.is_tripped();
     if kill.observe(market_risk.realised_pnl_usdc) {
+        if !kill_was_tripped {
+            metrics::record_kill_trip(market_id);
+        }
         // Kill switch tripped. Cancel any live quotes (idempotent) and refuse to place
         // new ones until the operator resets the switch out-of-band.
         let bid = guard.bid_order_id.take();
@@ -121,9 +145,11 @@ where
         drop(guard);
         if let Some(id) = bid {
             let _ = edge.cancel_order(&id).await;
+            metrics::record_cancel(market_id, "buy");
         }
         if let Some(id) = ask {
             let _ = edge.cancel_order(&id).await;
+            metrics::record_cancel(market_id, "sell");
         }
         warn!(
             market_id,
@@ -134,15 +160,18 @@ where
         return Ok(());
     }
 
-    let quotes: Quotes =
-        config
-            .strategy
-            .quotes(mid, market_risk.inventory, guard.vol.realised_vol());
+    let realised_vol = guard.vol.realised_vol();
+    let quotes: Quotes = config
+        .strategy
+        .quotes(mid, market_risk.inventory, realised_vol);
+    metrics::set_realised_vol(market_id, realised_vol);
+    metrics::set_spread_bps(market_id, quotes.spread_bps);
+    metrics::set_skew_bps(market_id, quotes.skew_bps);
     debug!(
         market_id,
         mid,
         inv = market_risk.inventory,
-        vol = guard.vol.realised_vol(),
+        vol = realised_vol,
         bid = quotes.bid,
         ask = quotes.ask,
         spread_bps = quotes.spread_bps,
@@ -164,17 +193,21 @@ where
         if let Err(err) = edge.cancel_order(&bid_id).await {
             warn!(market_id, %err, "cancel bid failed, will resubmit anyway");
         }
+        metrics::record_cancel(market_id, "buy");
     }
     if let Some(ask_id) = guard.ask_order_id.take() {
         if let Err(err) = edge.cancel_order(&ask_id).await {
             warn!(market_id, %err, "cancel ask failed, will resubmit anyway");
         }
+        metrics::record_cancel(market_id, "sell");
     }
 
     let bid_req = build_order(market_id, config, "buy", quotes.bid);
     let ask_req = build_order(market_id, config, "sell", quotes.ask);
     let bid_id = edge.place_order(&bid_req).await.context("place bid")?;
+    metrics::record_place(market_id, "buy");
     let ask_id = edge.place_order(&ask_req).await.context("place ask")?;
+    metrics::record_place(market_id, "sell");
     guard.bid_order_id = Some(bid_id);
     guard.ask_order_id = Some(ask_id);
     guard.last_mid = Some(mid);
