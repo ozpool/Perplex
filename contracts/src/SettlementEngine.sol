@@ -9,6 +9,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ISettlementEngine} from "./interfaces/ISettlementEngine.sol";
 import {IPositionRegistry} from "./interfaces/IPositionRegistry.sol";
 import {ICollateralVault} from "./interfaces/ICollateralVault.sol";
+import {IFillHook} from "./interfaces/IFillHook.sol";
 
 /// @title SettlementEngine
 /// @notice Authorises and applies batches of fills produced by the off-chain matching engine.
@@ -38,6 +39,10 @@ contract SettlementEngine is ISettlementEngine, EIP712 {
 
     address public owner;
     address public override operator;
+    /// @notice Optional per-fill callback. When non-zero, applyBatch invokes
+    ///         `hook.onFill(user, marketId, sizeDelta, priceX18, realisedPnl)` after each
+    ///         fill has settled. A revert in the hook aborts the entire batch.
+    address public override fillHook;
 
     mapping(uint256 => bool) private _usedNonces;
 
@@ -73,6 +78,13 @@ contract SettlementEngine is ISettlementEngine, EIP712 {
         owner = newOwner;
     }
 
+    /// @inheritdoc ISettlementEngine
+    /// @dev Pass `address(0)` to disable the hook entirely.
+    function setFillHook(address newHook) external onlyOwner {
+        emit FillHookUpdated(fillHook, newHook);
+        fillHook = newHook;
+    }
+
     // -- entrypoint -----------------------------------------------------------
 
     /// @inheritdoc ISettlementEngine
@@ -88,6 +100,7 @@ contract SettlementEngine is ISettlementEngine, EIP712 {
             _hashTypedDataV4(keccak256(abi.encode(BATCH_TYPEHASH, nonce, deadline, _hashFills(fills))));
         if (ECDSA.recover(digest, signature) != operator) revert BadSignature();
 
+        address hook = fillHook;
         for (uint256 i = 0; i < fills.length; ++i) {
             Fill calldata f = fills[i];
             (int256 realisedPnl, int256 fundingDelta) =
@@ -100,6 +113,9 @@ contract SettlementEngine is ISettlementEngine, EIP712 {
                 }
             }
             emit FillSettled(f.user, f.marketId, realisedPnl, fundingDelta, f.fee);
+            if (hook != address(0)) {
+                IFillHook(hook).onFill(f.user, f.marketId, f.sizeDelta, f.priceX18, realisedPnl);
+            }
         }
 
         emit BatchApplied(nonce, operator, fills.length);

@@ -15,6 +15,7 @@ interface ISettlementEngine {
         address indexed user, bytes32 indexed marketId, int256 realisedPnl, int256 fundingDelta, int256 fee
     );
     event OperatorUpdated(address indexed previousOperator, address indexed newOperator);
+    event FillHookUpdated(address indexed previousHook, address indexed newHook);
 
     error NotOwner();
     error AlreadyWired();
@@ -30,6 +31,10 @@ interface ISettlementEngine {
     function nonceUsed(uint256 nonce) external view returns (bool);
 
     function operator() external view returns (address);
+
+    function fillHook() external view returns (address);
+
+    function setFillHook(address newHook) external;
 
     function FILL_TYPEHASH() external view returns (bytes32);
 

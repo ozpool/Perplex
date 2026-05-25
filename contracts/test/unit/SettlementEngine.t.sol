@@ -15,6 +15,41 @@ import {IPositionRegistry} from "../../src/interfaces/IPositionRegistry.sol";
 import {IMarketRegistry} from "../../src/interfaces/IMarketRegistry.sol";
 import {IOracleAdapter} from "../../src/interfaces/IOracleAdapter.sol";
 import {ICollateralVault} from "../../src/interfaces/ICollateralVault.sol";
+import {IFillHook} from "../../src/interfaces/IFillHook.sol";
+
+contract RecordingHook is IFillHook {
+    struct Call {
+        address user;
+        bytes32 marketId;
+        int256 sizeDelta;
+        uint256 priceX18;
+        int256 realisedPnl;
+    }
+
+    Call[] public calls;
+
+    function count() external view returns (uint256) {
+        return calls.length;
+    }
+
+    function onFill(
+        address user,
+        bytes32 marketId,
+        int256 sizeDelta,
+        uint256 priceX18,
+        int256 realisedPnl
+    ) external override {
+        calls.push(Call(user, marketId, sizeDelta, priceX18, realisedPnl));
+    }
+}
+
+contract RevertingHook is IFillHook {
+    error HookBlocked();
+
+    function onFill(address, bytes32, int256, uint256, int256) external pure override {
+        revert HookBlocked();
+    }
+}
 
 contract SettlementEngineTest is Test {
     SettlementEngine internal engine;
@@ -242,6 +277,48 @@ contract SettlementEngineTest is Test {
         vm.prank(mallory);
         vm.expectRevert(ISettlementEngine.NotOwner.selector);
         engine.setOperator(mallory);
+    }
+
+    function test_setFillHook_onlyOwner() public {
+        RecordingHook hook = new RecordingHook();
+        vm.prank(mallory);
+        vm.expectRevert(ISettlementEngine.NotOwner.selector);
+        engine.setFillHook(address(hook));
+    }
+
+    function test_setFillHook_writes() public {
+        RecordingHook hook = new RecordingHook();
+        vm.prank(owner);
+        engine.setFillHook(address(hook));
+        assertEq(engine.fillHook(), address(hook));
+    }
+
+    function test_applyBatch_invokesFillHookPerFill() public {
+        RecordingHook hook = new RecordingHook();
+        vm.prank(owner);
+        engine.setFillHook(address(hook));
+
+        ISettlementEngine.Fill[] memory fills = _onePair();
+        uint64 deadline = uint64(block.timestamp + 100);
+        engine.applyBatch(fills, 99, deadline, _signBatch(operatorPk, fills, 99, deadline));
+
+        assertEq(hook.count(), fills.length, "hook called per fill");
+        (address u0, bytes32 m0, int256 sd0,,) = hook.calls(0);
+        assertEq(u0, alice);
+        assertEq(m0, BTC);
+        assertEq(sd0, int256(0.1e18));
+    }
+
+    function test_applyBatch_hookRevertAbortsBatch() public {
+        RevertingHook hook = new RevertingHook();
+        vm.prank(owner);
+        engine.setFillHook(address(hook));
+
+        ISettlementEngine.Fill[] memory fills = _onePair();
+        uint64 deadline = uint64(block.timestamp + 100);
+        bytes memory sig = _signBatch(operatorPk, fills, 100, deadline);
+        vm.expectRevert(RevertingHook.HookBlocked.selector);
+        engine.applyBatch(fills, 100, deadline, sig);
     }
 
     // -- helpers -------------------------------------------------------------

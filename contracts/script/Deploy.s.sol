@@ -11,6 +11,7 @@ import {MarketRegistry} from "../src/MarketRegistry.sol";
 import {PositionRegistry} from "../src/PositionRegistry.sol";
 import {CollateralVault} from "../src/CollateralVault.sol";
 import {SettlementEngine} from "../src/SettlementEngine.sol";
+import {SyntheticCounterparty} from "../src/SyntheticCounterparty.sol";
 import {IMarketRegistry} from "../src/interfaces/IMarketRegistry.sol";
 import {IPositionRegistry} from "../src/interfaces/IPositionRegistry.sol";
 import {IOracleAdapter} from "../src/interfaces/IOracleAdapter.sol";
@@ -26,6 +27,7 @@ contract Deploy is Script {
         address positionRegistry;
         address collateralVault;
         address settlementEngine;
+        address syntheticCounterparty;
         address liquidationEngine;
         address owner;
         uint256 chainId;
@@ -66,6 +68,12 @@ contract Deploy is Script {
 
         positionRegistry.setWiring(ICollateralVault(address(vault)), address(engine), liquidation);
 
+        SyntheticCounterparty counterparty = new SyntheticCounterparty(
+            owner, address(engine), address(usdc), address(vault)
+        );
+        engine.setFillHook(address(counterparty));
+        _seedCounterpartyCaps(counterparty);
+
         _listMarkets(markets);
         _seedPrices(oracle);
 
@@ -78,6 +86,7 @@ contract Deploy is Script {
             positionRegistry: address(positionRegistry),
             collateralVault: address(vault),
             settlementEngine: address(engine),
+            syntheticCounterparty: address(counterparty),
             liquidationEngine: liquidation,
             owner: owner,
             chainId: block.chainid
@@ -124,6 +133,15 @@ contract Deploy is Script {
         );
     }
 
+    /// @dev Phase 7 caps are deliberately generous on devnet; production caps come from the
+    ///      counterparty risk doc and would be tuned per-market. 100 BTC / 1000 ETH /
+    ///      50_000 SOL of net exposure is more than the maker bot ever needs locally.
+    function _seedCounterpartyCaps(SyntheticCounterparty counterparty) internal {
+        counterparty.setCap(keccak256("btc-usd"), 100e18);
+        counterparty.setCap(keccak256("eth-usd"), 1_000e18);
+        counterparty.setCap(keccak256("sol-usd"), 50_000e18);
+    }
+
     function _seedPrices(MockOracle oracle) internal {
         bytes32[] memory ids = new bytes32[](3);
         uint256[] memory prices = new uint256[](3);
@@ -149,6 +167,7 @@ contract Deploy is Script {
         vm.serializeAddress(json, "PositionRegistry", d.positionRegistry);
         vm.serializeAddress(json, "CollateralVault", d.collateralVault);
         vm.serializeAddress(json, "SettlementEngine", d.settlementEngine);
+        vm.serializeAddress(json, "SyntheticCounterparty", d.syntheticCounterparty);
         vm.serializeAddress(json, "LiquidationEngine", d.liquidationEngine);
         vm.serializeAddress(json, "owner", d.owner);
         string memory out = vm.serializeUint(json, "chainId", d.chainId);
@@ -163,5 +182,6 @@ contract Deploy is Script {
         console2.log("PositionRegistry ", d.positionRegistry);
         console2.log("CollateralVault  ", d.collateralVault);
         console2.log("SettlementEngine ", d.settlementEngine);
+        console2.log("SyntheticCpty    ", d.syntheticCounterparty);
     }
 }
