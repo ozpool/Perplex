@@ -1,9 +1,10 @@
 //! Quote agent loop. One task per market, each holding a per-market Redis lease so only
-//! one agent instance is quoting at a time. Strategy is a base-spread symmetric quoter;
-//! Phase 7 follow-ups (#44) introduce the inventory / vol / kill-switch logic on top.
+//! one agent instance is quoting at a time. Strategy lives in `crate::strategy`; this
+//! module owns the orchestration: oracle polling, vol-window sampling, risk fetching,
+//! kill-switch evaluation, and cancel/replace bookkeeping.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use perplex_funding::LeaseBackend;
@@ -11,23 +12,30 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::edge::{EdgeClient, PlaceOrderRequest};
+use crate::kill::KillSwitch;
 use crate::oracle::OracleSource;
+use crate::risk::RiskSource;
+use crate::strategy::{Quotes, StrategyParams};
+use crate::vol::VolWindow;
 
-/// Configuration for a quote-agent instance. One config applies to all markets the binary
-/// is told to quote; individual market state (last price, open orders, lease token) lives
-/// in the per-market loop.
 #[derive(Debug, Clone)]
 pub struct QuoteAgentConfig {
     /// Markets the agent should quote, e.g. `["btc-usd", "eth-usd"]`.
     pub markets: Vec<String>,
     /// Address the agent signs as. Used for `clientOrderId` namespacing and structured logs.
     pub account: String,
-    /// Half-spread (bps) added on each side of mid. A 10-bps base means a 20-bps total
-    /// spread (5 bps below mid for the bid, 5 bps above for the ask).
-    pub base_spread_bps: u32,
+    /// Pricing strategy params (base spread, inventory penalty, vol multiplier, skew).
+    pub strategy: StrategyParams,
+    /// Realised-vol window length. The PRD calls for 15 min but devnet runs can use a
+    /// shorter window to react inside the smoke-test budget.
+    pub vol_window: Duration,
+    /// Per-market kill threshold (positive USDC); the switch trips when the latest
+    /// realised PnL drops below `-kill_threshold_usdc`.
+    pub kill_threshold_usdc: f64,
     /// Quote size in base-asset units, decimal-string ready (eg. "0.05").
     pub quote_size: String,
-    /// Interval between oracle polls. Each tick: renew lease, reprice if mid moved, sleep.
+    /// Interval between oracle polls. Each tick: renew lease, sample mid, reprice if
+    /// needed, sleep.
     pub poll_interval: Duration,
     /// Lease TTL. Should be at least 2-3x poll_interval to survive transient stalls.
     pub lease_ttl: Duration,
@@ -44,7 +52,9 @@ impl Default for QuoteAgentConfig {
         Self {
             markets: vec!["btc-usd".into(), "eth-usd".into(), "sol-usd".into()],
             account: "0x0000000000000000000000000000000000000000".into(),
-            base_spread_bps: 10,
+            strategy: StrategyParams::default(),
+            vol_window: Duration::from_secs(15 * 60),
+            kill_threshold_usdc: 500.0,
             quote_size: "0.05".into(),
             poll_interval: Duration::from_millis(500),
             lease_ttl: Duration::from_secs(5),
@@ -54,58 +64,91 @@ impl Default for QuoteAgentConfig {
     }
 }
 
-/// Pure pricing strategy. Returned by the agent loop and isolated for unit testing —
-/// follow-up issue #44 grows this with inventory + vol terms without touching the loop.
-#[derive(Debug, Clone)]
-pub struct QuoteStrategy {
-    pub base_spread_bps: u32,
+/// Per-market mutable state. Kept behind a single Mutex so the iteration is atomic from
+/// the agent's perspective — cancel and replace can't interleave with a concurrent tick.
+#[derive(Debug)]
+pub(crate) struct MarketState {
+    pub bid_order_id: Option<String>,
+    pub ask_order_id: Option<String>,
+    pub last_mid: Option<f64>,
+    pub vol: VolWindow,
 }
 
-impl QuoteStrategy {
-    pub fn new(base_spread_bps: u32) -> Self {
-        Self { base_spread_bps }
+impl MarketState {
+    fn new(vol_window: Duration) -> Self {
+        Self {
+            bid_order_id: None,
+            ask_order_id: None,
+            last_mid: None,
+            vol: VolWindow::new(vol_window),
+        }
     }
-
-    /// Returns `(bid, ask)` for a given `mid`. Half-spread on each side; we never let the
-    /// bid exceed mid or the ask drop below mid.
-    pub fn quotes(&self, mid: f64) -> (f64, f64) {
-        let half = self.base_spread_bps as f64 / 2.0 / 10_000.0;
-        let bid = mid * (1.0 - half);
-        let ask = mid * (1.0 + half);
-        (bid, ask)
-    }
-}
-
-/// Tracks the live quote pair for a single market across iterations of the loop. Held
-/// behind a Mutex inside the per-market task so cancel-and-replace is atomic from the
-/// agent's perspective even if a future strategy fans out further.
-#[derive(Debug, Default)]
-pub(crate) struct OpenQuotes {
-    bid_order_id: Option<String>,
-    ask_order_id: Option<String>,
-    last_mid: Option<f64>,
 }
 
 /// Single iteration of the quote loop. Module-private — tests in the same module drive
 /// it directly to avoid spinning up the full lease / sleep cycle.
-pub(crate) async fn run_quote_iteration<E, O>(
+pub(crate) async fn run_quote_iteration<E, O, R>(
     market_id: &str,
     config: &QuoteAgentConfig,
-    strategy: &QuoteStrategy,
     edge: &E,
     oracle: &O,
-    state: &Arc<Mutex<OpenQuotes>>,
+    risk: &R,
+    kill: &KillSwitch,
+    state: &Arc<Mutex<MarketState>>,
 ) -> Result<()>
 where
     E: EdgeClient + ?Sized,
     O: OracleSource + ?Sized,
+    R: RiskSource + ?Sized,
 {
     let mid = oracle
         .mid_price(market_id)
         .await
         .with_context(|| format!("oracle mid for {market_id}"))?;
-    let (bid, ask) = strategy.quotes(mid);
+    let market_risk = risk
+        .fetch(market_id)
+        .await
+        .with_context(|| format!("risk fetch for {market_id}"))?;
+
     let mut guard = state.lock().await;
+    guard.vol.record(Instant::now(), mid);
+
+    if kill.observe(market_risk.realised_pnl_usdc) {
+        // Kill switch tripped. Cancel any live quotes (idempotent) and refuse to place
+        // new ones until the operator resets the switch out-of-band.
+        let bid = guard.bid_order_id.take();
+        let ask = guard.ask_order_id.take();
+        drop(guard);
+        if let Some(id) = bid {
+            let _ = edge.cancel_order(&id).await;
+        }
+        if let Some(id) = ask {
+            let _ = edge.cancel_order(&id).await;
+        }
+        warn!(
+            market_id,
+            pnl = market_risk.realised_pnl_usdc,
+            threshold = kill.threshold_usdc(),
+            "kill switch tripped; quotes pulled"
+        );
+        return Ok(());
+    }
+
+    let quotes: Quotes =
+        config
+            .strategy
+            .quotes(mid, market_risk.inventory, guard.vol.realised_vol());
+    debug!(
+        market_id,
+        mid,
+        inv = market_risk.inventory,
+        vol = guard.vol.realised_vol(),
+        bid = quotes.bid,
+        ask = quotes.ask,
+        spread_bps = quotes.spread_bps,
+        skew_bps = quotes.skew_bps,
+        "computed quotes"
+    );
 
     if let Some(last) = guard.last_mid {
         let move_bps = ((mid - last).abs() / last) * 10_000.0;
@@ -113,10 +156,6 @@ where
             && guard.bid_order_id.is_some()
             && guard.ask_order_id.is_some()
         {
-            debug!(
-                market_id,
-                mid, last, "skip reprice; movement under threshold"
-            );
             return Ok(());
         }
     }
@@ -132,13 +171,14 @@ where
         }
     }
 
-    let bid_req = build_order(market_id, config, "buy", bid);
-    let ask_req = build_order(market_id, config, "sell", ask);
+    let bid_req = build_order(market_id, config, "buy", quotes.bid);
+    let ask_req = build_order(market_id, config, "sell", quotes.ask);
     let bid_id = edge.place_order(&bid_req).await.context("place bid")?;
     let ask_id = edge.place_order(&ask_req).await.context("place ask")?;
     guard.bid_order_id = Some(bid_id);
     guard.ask_order_id = Some(ask_id);
     guard.last_mid = Some(mid);
+    let _ = market_risk;
     Ok(())
 }
 
@@ -178,9 +218,6 @@ fn lease_key(market_id: &str) -> String {
     format!("perplex:quote-agent:lease:{market_id}")
 }
 
-/// Acquire the lease for a market. Returns `Ok(token)` on success or an error if another
-/// instance holds the lease — surfaced verbatim to the operator so the CLI exits non-zero
-/// instead of silently doing nothing.
 pub async fn acquire_market_lease<B: LeaseBackend>(
     backend: &B,
     market_id: &str,
@@ -199,23 +236,23 @@ pub async fn acquire_market_lease<B: LeaseBackend>(
     Ok(token)
 }
 
-/// Run the agent across all configured markets. Each market gets its own task so a slow
-/// edge or oracle response on one market doesn't stall the others.
-pub async fn run_quote_agent<B, E, O>(
+pub async fn run_quote_agent<B, E, O, R>(
     config: QuoteAgentConfig,
     lease: B,
     edge: E,
     oracle: O,
+    risk: R,
 ) -> Result<()>
 where
     B: LeaseBackend + 'static,
     E: EdgeClient + 'static,
     O: OracleSource + 'static,
+    R: RiskSource + 'static,
 {
     let edge = Arc::new(edge);
     let oracle = Arc::new(oracle);
     let lease = Arc::new(lease);
-    let strategy = QuoteStrategy::new(config.base_spread_bps);
+    let risk = Arc::new(risk);
     let config = Arc::new(config);
 
     let mut handles = Vec::new();
@@ -226,10 +263,10 @@ where
             market_id.clone(),
             token,
             Arc::clone(&config),
-            strategy.clone(),
             Arc::clone(&lease),
             Arc::clone(&edge),
             Arc::clone(&oracle),
+            Arc::clone(&risk),
         ));
         handles.push(handle);
     }
@@ -241,21 +278,23 @@ where
     Ok(())
 }
 
-async fn market_loop<B, E, O>(
+async fn market_loop<B, E, O, R>(
     market_id: String,
     token: String,
     config: Arc<QuoteAgentConfig>,
-    strategy: QuoteStrategy,
     lease: Arc<B>,
     edge: Arc<E>,
     oracle: Arc<O>,
+    risk: Arc<R>,
 ) -> Result<()>
 where
     B: LeaseBackend,
     E: EdgeClient,
     O: OracleSource,
+    R: RiskSource,
 {
-    let state = Arc::new(Mutex::new(OpenQuotes::default()));
+    let state = Arc::new(Mutex::new(MarketState::new(config.vol_window)));
+    let kill = KillSwitch::new(config.kill_threshold_usdc);
     loop {
         let renewed = lease
             .renew(&lease_key(&market_id), &token, config.lease_ttl)
@@ -267,7 +306,7 @@ where
             ));
         }
         if let Err(err) =
-            run_quote_iteration(&market_id, &config, &strategy, &*edge, &*oracle, &state).await
+            run_quote_iteration(&market_id, &config, &*edge, &*oracle, &*risk, &kill, &state).await
         {
             warn!(market = %market_id, %err, "quote iteration failed; will retry next tick");
         }
@@ -278,6 +317,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::risk::test_support::MockRiskSource;
+    use crate::risk::MarketRisk;
     use async_trait::async_trait;
     use perplex_funding::MockBackend;
     use std::collections::HashMap;
@@ -356,34 +397,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn strategy_quotes_are_symmetric() {
-        let s = QuoteStrategy::new(10);
-        let (bid, ask) = s.quotes(100.0);
-        assert!(bid < 100.0);
-        assert!(ask > 100.0);
-        // 5 bps half spread → ±0.05
-        assert!((100.0 - bid - 0.05).abs() < 1e-9);
-        assert!((ask - 100.0 - 0.05).abs() < 1e-9);
+    fn flat_cfg() -> QuoteAgentConfig {
+        QuoteAgentConfig {
+            markets: vec!["btc-usd".into()],
+            ..Default::default()
+        }
     }
 
     #[tokio::test]
     async fn first_iteration_places_bid_and_ask() {
-        let cfg = QuoteAgentConfig {
-            markets: vec!["btc-usd".into()],
-            ..Default::default()
-        };
-        let strategy = QuoteStrategy::new(cfg.base_spread_bps);
+        let cfg = flat_cfg();
         let edge = MockEdge::default();
         let oracle = StaticOracle::new(&[("btc-usd", 100_000.0)]);
-        let state = Arc::new(Mutex::new(OpenQuotes::default()));
+        let risk = MockRiskSource::new(&[]);
+        let kill = KillSwitch::new(cfg.kill_threshold_usdc);
+        let state = Arc::new(Mutex::new(MarketState::new(cfg.vol_window)));
 
-        run_quote_iteration("btc-usd", &cfg, &strategy, &edge, &oracle, &state)
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
             .await
             .unwrap();
 
         let events = edge.events();
-        assert_eq!(events.len(), 2, "exactly bid + ask");
+        assert_eq!(events.len(), 2, "exactly bid + ask: {events:?}");
         assert!(events[0].starts_with("place buy"));
         assert!(events[1].starts_with("place sell"));
     }
@@ -391,26 +426,24 @@ mod tests {
     #[tokio::test]
     async fn second_iteration_cancels_when_price_moves() {
         let cfg = QuoteAgentConfig {
-            markets: vec!["btc-usd".into()],
             reprice_threshold_bps: 1,
-            ..Default::default()
+            ..flat_cfg()
         };
-        let strategy = QuoteStrategy::new(cfg.base_spread_bps);
         let edge = MockEdge::default();
         let oracle = StaticOracle::new(&[("btc-usd", 100_000.0)]);
-        let state = Arc::new(Mutex::new(OpenQuotes::default()));
+        let risk = MockRiskSource::new(&[]);
+        let kill = KillSwitch::new(cfg.kill_threshold_usdc);
+        let state = Arc::new(Mutex::new(MarketState::new(cfg.vol_window)));
 
-        run_quote_iteration("btc-usd", &cfg, &strategy, &edge, &oracle, &state)
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
             .await
             .unwrap();
-        // 1% move triggers reprice.
         oracle.set("btc-usd", 101_000.0);
-        run_quote_iteration("btc-usd", &cfg, &strategy, &edge, &oracle, &state)
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
             .await
             .unwrap();
 
         let events = edge.events();
-        // place x2, cancel x2, place x2 = 6 events
         assert_eq!(events.len(), 6, "{events:?}");
         assert!(events.iter().any(|e| e.starts_with("cancel ord_1")));
         assert!(events.iter().any(|e| e.starts_with("cancel ord_2")));
@@ -419,24 +452,138 @@ mod tests {
     #[tokio::test]
     async fn second_iteration_skips_when_movement_below_threshold() {
         let cfg = QuoteAgentConfig {
-            markets: vec!["btc-usd".into()],
-            reprice_threshold_bps: 50, // tolerate moves up to 0.5%
-            ..Default::default()
+            reprice_threshold_bps: 50,
+            ..flat_cfg()
         };
-        let strategy = QuoteStrategy::new(cfg.base_spread_bps);
         let edge = MockEdge::default();
         let oracle = StaticOracle::new(&[("btc-usd", 100_000.0)]);
-        let state = Arc::new(Mutex::new(OpenQuotes::default()));
+        let risk = MockRiskSource::new(&[]);
+        let kill = KillSwitch::new(cfg.kill_threshold_usdc);
+        let state = Arc::new(Mutex::new(MarketState::new(cfg.vol_window)));
 
-        run_quote_iteration("btc-usd", &cfg, &strategy, &edge, &oracle, &state)
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
             .await
             .unwrap();
-        oracle.set("btc-usd", 100_100.0); // 10 bps move, under 50 bps threshold
-        run_quote_iteration("btc-usd", &cfg, &strategy, &edge, &oracle, &state)
+        oracle.set("btc-usd", 100_100.0);
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
             .await
             .unwrap();
 
         assert_eq!(edge.events().len(), 2, "second tick is a no-op");
+    }
+
+    #[tokio::test]
+    async fn kill_switch_trips_and_pulls_quotes() {
+        let cfg = QuoteAgentConfig {
+            kill_threshold_usdc: 100.0,
+            reprice_threshold_bps: 1,
+            ..flat_cfg()
+        };
+        let edge = MockEdge::default();
+        let oracle = StaticOracle::new(&[("btc-usd", 100_000.0)]);
+        let risk = MockRiskSource::new(&[(
+            "btc-usd",
+            MarketRisk {
+                inventory: 0.0,
+                realised_pnl_usdc: 0.0,
+            },
+        )]);
+        let kill = KillSwitch::new(cfg.kill_threshold_usdc);
+        let state = Arc::new(Mutex::new(MarketState::new(cfg.vol_window)));
+
+        // Round 1: healthy, quotes get placed.
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
+            .await
+            .unwrap();
+        assert_eq!(edge.events().len(), 2);
+
+        // Round 2: blow past the threshold → kill trips → cancels and skips placing.
+        risk.set(
+            "btc-usd",
+            MarketRisk {
+                inventory: 0.0,
+                realised_pnl_usdc: -250.0,
+            },
+        );
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
+            .await
+            .unwrap();
+        let events = edge.events();
+        assert!(kill.is_tripped());
+        assert!(events.iter().filter(|e| e.starts_with("cancel ")).count() >= 2);
+        assert_eq!(
+            events.iter().filter(|e| e.starts_with("place ")).count(),
+            2,
+            "no new places after kill"
+        );
+
+        // Round 3: even if PnL recovers, the switch stays tripped — no new orders.
+        risk.set(
+            "btc-usd",
+            MarketRisk {
+                inventory: 0.0,
+                realised_pnl_usdc: 1_000.0,
+            },
+        );
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
+            .await
+            .unwrap();
+        assert_eq!(
+            edge.events()
+                .iter()
+                .filter(|e| e.starts_with("place "))
+                .count(),
+            2,
+            "kill is sticky"
+        );
+    }
+
+    #[tokio::test]
+    async fn long_inventory_skews_quotes_down() {
+        let cfg = QuoteAgentConfig {
+            strategy: StrategyParams {
+                base_spread_bps: 10,
+                inv_penalty_bps_at_max: 0,
+                inv_max: 100.0,
+                vol_mult_bps: 0,
+                inv_skew_bps_at_max: 20,
+            },
+            ..flat_cfg()
+        };
+        let edge = MockEdge::default();
+        let oracle = StaticOracle::new(&[("btc-usd", 100_000.0)]);
+        let risk = MockRiskSource::new(&[(
+            "btc-usd",
+            MarketRisk {
+                inventory: 100.0, // at cap → full negative skew
+                realised_pnl_usdc: 0.0,
+            },
+        )]);
+        let kill = KillSwitch::new(cfg.kill_threshold_usdc);
+        let state = Arc::new(Mutex::new(MarketState::new(cfg.vol_window)));
+
+        run_quote_iteration("btc-usd", &cfg, &edge, &oracle, &risk, &kill, &state)
+            .await
+            .unwrap();
+        let events = edge.events();
+        // skew_bps = -20, half spread = 5 bps → mid_skewed = 99_800
+        //   bid = 99_800 * (1 - 0.0005) = 99_750.1
+        //   ask = 99_800 * (1 + 0.0005) = 99_849.9
+        // Both must sit below the un-skewed mid of 100_000.
+        let buy_price: f64 = events[0]
+            .split_whitespace()
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let sell_price: f64 = events[1]
+            .split_whitespace()
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(buy_price < 100_000.0);
+        assert!(sell_price < 100_000.0);
     }
 
     #[tokio::test]
@@ -447,11 +594,9 @@ mod tests {
             .unwrap();
         let second = acquire_market_lease(&backend, "btc-usd", Duration::from_secs(5)).await;
         assert!(second.is_err(), "second acquisition must fail");
-        // ETH lease is independent.
         acquire_market_lease(&backend, "eth-usd", Duration::from_secs(5))
             .await
             .unwrap();
-        // first token still owns the BTC slot
         assert!(!first.is_empty());
     }
 }
