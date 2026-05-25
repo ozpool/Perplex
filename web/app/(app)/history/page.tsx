@@ -1,55 +1,19 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Tabs } from "@/components/ui/Tabs";
-import { useBalance } from "@/lib/api/queries";
-import { api } from "@/lib/api/rest";
+import { useFills, useBalance } from "@/lib/api/queries";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { EmptyState } from "@/components/common/EmptyState";
 import { formatDateTime } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
-import type { FillsResponse } from "@/lib/types/contract";
 
 type Tab = "fills" | "deposits" | "withdrawals" | "funding";
 
-const PAGE_SIZE = 50;
-
 export default function HistoryPage() {
   const [tab, setTab] = useState<Tab>("fills");
+  const { data: fills } = useFills();
   const { data: balance } = useBalance();
-
-  const {
-    data: fillsPages,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading: fillsLoading,
-  } = useInfiniteQuery<FillsResponse, Error>({
-    queryKey: ["fills", "infinite"],
-    initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api.fills({ limit: PAGE_SIZE, before: pageParam as string | undefined }),
-    getNextPageParam: (last) => last.nextBefore ?? undefined,
-  });
-
-  const allFills = useMemo(
-    () => fillsPages?.pages.flatMap((p) => p.fills) ?? [],
-    [fillsPages],
-  );
-
-  // IntersectionObserver to auto-fetch the next page when the sentinel scrolls
-  // into view. Wrapped in a ref so it survives re-renders during pagination.
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (tab !== "fills") return;
-    const el = sentinelRef.current;
-    if (!el || !hasNextPage || isFetchingNextPage) return;
-    const io = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) fetchNextPage();
-    });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [tab, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <div className="px-3 sm:px-5 py-4 sm:py-6 max-w-screen-xl w-full mx-auto flex flex-col gap-4">
@@ -65,7 +29,7 @@ export default function HistoryPage() {
             value={tab}
             onChange={setTab}
             items={[
-              { value: "fills", label: "Fills", count: allFills.length },
+              { value: "fills", label: "Fills", count: fills?.fills.length ?? 0 },
               { value: "deposits", label: "Deposits", count: balance?.pendingDeposits.length ?? 0 },
               { value: "withdrawals", label: "Withdrawals", count: balance?.pendingWithdrawals.length ?? 0 },
               { value: "funding", label: "Funding", count: 0 },
@@ -74,7 +38,7 @@ export default function HistoryPage() {
         </div>
 
         {tab === "fills" && (
-          allFills.length > 0 ? (
+          fills && fills.fills.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
@@ -91,7 +55,7 @@ export default function HistoryPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {allFills.map((f) => (
+                  {fills.fills.map((f) => (
                     <tr key={f.id} className="border-t border-border hover:bg-bg-2">
                       <td className="px-4 py-2.5 text-fg-mid">{formatDateTime(f.tsNs)}</td>
                       <td className="px-4 py-2.5 text-fg">{f.marketId.toUpperCase()}</td>
@@ -114,16 +78,7 @@ export default function HistoryPage() {
                   ))}
                 </tbody>
               </table>
-              <div ref={sentinelRef} className="h-10 flex items-center justify-center text-[11px] text-fg-muted">
-                {isFetchingNextPage
-                  ? "Loading more…"
-                  : hasNextPage
-                    ? "Scroll for more"
-                    : "End of history"}
-              </div>
             </div>
-          ) : fillsLoading ? (
-            <div className="p-8 text-center text-sm text-fg-muted">Loading fills…</div>
           ) : (
             <div className="p-8"><EmptyState title="No fills yet" description="Once you trade, your fills appear here." /></div>
           )

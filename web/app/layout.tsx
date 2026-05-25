@@ -27,15 +27,20 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f6f4fb",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
 };
 
+const themeInit = `(function(){try{var k='perplex-theme';var s=localStorage.getItem(k);var t=(s==='light'||s==='dark')?s:'light';var r=document.documentElement;r.classList.remove('light','dark');r.classList.add(t);}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${jbMono.variable} ${spaceGrotesk.variable} h-full antialiased`}>
-      <body className="min-h-dvh flex flex-col">
+    <html lang="en" className={`${inter.variable} ${jbMono.variable} ${spaceGrotesk.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
+      </head>
+      <body className="min-h-dvh flex flex-col" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

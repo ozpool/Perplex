@@ -1,12 +1,12 @@
 :root {
   color-scheme: light;
 
-  /* Surfaces — light lavender → white panels */
-  --bg-0: #f6f4fb;
-  --bg-1: #ffffff;
-  --bg-2: #f1eff6;
-  --bg-3: #e8e4ef;
-  --bg-hover: #ece8f3;
+  /* Surfaces — pure white base, faint cool panels */
+  --bg-0: #ffffff;
+  --bg-1: #fafafc;
+  --bg-2: #f4f3f8;
+  --bg-3: #ecebf2;
+  --bg-hover: #eeedf4;
 
   /* Borders — translucent navy so they sit cleanly on white + soft-grey panels */
   --border: rgba(15, 8, 52, 0.10);
@@ -57,4 +57,44 @@
 
   --topbar-h: 56px;
   --mobile-tab-h: 60px;
+}
+
+/* ── Dark theme overrides (applied when html.dark) ─────────────────────── */
+html.dark {
+  color-scheme: dark;
+
+  --bg-0: #0b0a14;
+  --bg-1: #14121f;
+  --bg-2: #1c1a2a;
+  --bg-3: #262236;
+  --bg-hover: #2a263b;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-accent: rgba(255, 255, 255, 0.28);
+
+  --fg: #f1eef9;
+  --fg-mid: #c9c3dc;
+  --fg-muted: #8a83a3;
+  --fg-dim: #5b5575;
+
+  --long: #34d399;
+  --long-strong: #10b981;
+  --long-soft: rgba(52, 211, 153, 0.14);
+  --long-soft-strong: rgba(52, 211, 153, 0.24);
+
+  --short: #f87171;
+  --short-strong: #ef4444;
+  --short-soft: rgba(248, 113, 113, 0.14);
+  --short-soft-strong: rgba(248, 113, 113, 0.24);
+
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.16);
+
+  --info: #60a5fa;
+  --info-soft: rgba(96, 165, 250, 0.16);
+
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 0 0 1px var(--border);
+  --shadow-elev-1: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-elev-2: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
 }

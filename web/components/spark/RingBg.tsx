@@ -45,7 +45,7 @@ export function RingBg() {
             cy="900"
             r={r.r}
             fill="none"
-            stroke="#0c0530"
+            stroke="var(--ring-stroke, #0c0530)"
             strokeOpacity={r.opacity}
             strokeWidth="1"
             shapeRendering="geometricPrecision"
