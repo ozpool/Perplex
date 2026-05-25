@@ -1,0 +1,31 @@
+[package]
+name = "perplex-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "perplex-cli"
+path = "src/bin/perplex_cli.rs"
+
+[dependencies]
+perplex-funding = { path = "../perplex-funding" }
+anyhow = { workspace = true }
+async-trait = "0.1"
+clap = { workspace = true }
+reqwest = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util", "sync"] }
