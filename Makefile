@@ -1,4 +1,4 @@
-.PHONY: help install dev-up dev-down dev-reset dev-deposit dev-trade dev-liquidate dev-logs deploy-sepolia-dry deploy-sepolia build test test-contracts test-rust lint fmt clean
+.PHONY: help install dev-up dev-down dev-reset dev-deposit dev-trade dev-liquidate sim-replay dev-logs deploy-sepolia-dry deploy-sepolia build test test-contracts test-rust lint fmt clean
 # Default anvil deployer key. Override per-env when deploying to Sepolia / mainnet.
 DEPLOYER_PRIVATE_KEY ?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -38,6 +38,9 @@ dev-trade: ## Place a smoke trade (Phase 3+)
 
 dev-liquidate: ## Force-crash price and verify liquidation pipeline (Phase 4+)
 	pnpm tsx scripts/smoke-liquidate.ts
+
+sim-replay: ## 30-day synthetic CEX-tape replay against the counterparty agent
+	pnpm tsx scripts/replay-binance.ts
 
 deploy-sepolia-dry: ## Simulate Sepolia deploy (no broadcast)
 	./scripts/deploy-sepolia.sh
