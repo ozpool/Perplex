@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { PerplexMark } from "./PerplexMark";
+import { ThemeToggle } from "@/components/common/ThemeToggle";
 
 const NAV = [
   { label: "Features", href: "/#features" },
@@ -14,12 +15,41 @@ const NAV = [
 
 export function PillNav() {
   const [open, setOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname() || "/";
   const showNav = pathname === "/";
+
+  useEffect(() => {
+    const target = document.getElementById("hero-cta");
+    if (!target) {
+      const onScroll = () => setScrolled(window.scrollY > 520);
+      onScroll();
+      window.addEventListener("scroll", onScroll, { passive: true });
+      return () => window.removeEventListener("scroll", onScroll);
+    }
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        setScrolled(
+          !entry.isIntersecting && entry.boundingClientRect.top < 0,
+        );
+      },
+      { threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [pathname]);
+
   return (
-    <header className="relative z-20">
+    <header className="sticky top-0 z-30 bg-transparent">
       <div className="flex items-center justify-between gap-4 px-6 sm:px-10 lg:px-14 py-6 sm:py-7">
-        <Link href="/" className="flex items-center gap-2 shrink-0 text-[var(--s-text)]" aria-label="Perplex home">
+        <Link
+          href="/"
+          className={
+            "flex items-center gap-2 shrink-0 text-[var(--s-text)] transition-opacity duration-700 ease-out " +
+            (scrolled ? "opacity-0 pointer-events-none" : "opacity-100")
+          }
+          aria-label="Perplex home"
+        >
           <PerplexMark size={30} />
           <span className="font-display text-[22px] font-semibold tracking-[-0.04em]">
             perplex<span className="text-[var(--s-accent)]">.</span>
@@ -44,9 +74,22 @@ export function PillNav() {
         )}
 
         <div className="hidden sm:flex items-center gap-2">
+          <div
+            className={
+              "transition-opacity duration-700 ease-out " +
+              (scrolled ? "opacity-0 pointer-events-none" : "opacity-100")
+            }
+          >
+            <ThemeToggle variant="spark" />
+          </div>
           <Link
             href="/markets"
-            className="inline-flex items-center gap-2 h-12 px-6 rounded-full bg-[var(--s-card)] border border-[var(--s-line)] text-[14px] text-[var(--s-text)] font-medium hover:text-[var(--s-accent)] transition-colors shadow-[0_1px_0_rgba(15,8,52,0.04),0_4px_18px_-10px_rgba(15,8,52,0.22)]"
+            className={
+              "inline-flex items-center gap-2 h-12 px-6 rounded-full text-[14px] font-bold transition-[background-color,background-image,color,border-color,box-shadow,transform] duration-500 ease-out " +
+              (scrolled
+                ? "bg-[var(--s-accent)] text-white border border-transparent hover:brightness-110 hover:-translate-y-0.5 shadow-[0_4px_12px_rgba(255,107,26,0.35),0_16px_32px_-12px_rgba(255,107,26,0.55)]"
+                : "bg-[var(--s-card)] border border-[var(--s-line)] text-[var(--s-text)] hover:text-[var(--s-accent)] shadow-[0_1px_0_rgba(15,8,52,0.04),0_4px_18px_-10px_rgba(15,8,52,0.22)]")
+            }
           >
             Get Started
           </Link>
@@ -56,7 +99,10 @@ export function PillNav() {
             target="_blank"
             rel="noopener noreferrer"
             aria-label="GitHub"
-            className="inline-flex items-center justify-center size-12 rounded-full bg-[var(--s-card)] border border-[var(--s-line)] text-[var(--s-text)] hover:text-[var(--s-accent)] transition-colors shadow-[0_1px_0_rgba(15,8,52,0.04),0_4px_18px_-10px_rgba(15,8,52,0.22)]"
+            className={
+              "inline-flex items-center justify-center size-12 rounded-full bg-[var(--s-card)] border border-[var(--s-line)] text-[var(--s-text)] hover:text-[var(--s-accent)] transition-opacity duration-700 ease-out shadow-[0_1px_0_rgba(15,8,52,0.04),0_4px_18px_-10px_rgba(15,8,52,0.22)] " +
+              (scrolled ? "opacity-0 pointer-events-none" : "opacity-100")
+            }
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <path

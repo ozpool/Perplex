@@ -50,9 +50,14 @@ export function HowItWorks() {
               <span
                 aria-hidden
                 className={
-                  "absolute -bottom-6 font-display text-[120px] font-bold text-[var(--s-accent-tint)] leading-none select-none " +
+                  "absolute -bottom-6 font-display text-[120px] font-bold leading-none select-none bg-clip-text text-transparent " +
                   (i === 0 ? "right-2" : "-right-6")
                 }
+                style={{
+                  backgroundImage:
+                    "linear-gradient(135deg, #ff9d4d 0%, #ff6b1a 55%, #f04e0c 100%)",
+                  WebkitBackgroundClip: "text",
+                }}
               >
                 {i + 1}
               </span>

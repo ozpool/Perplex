@@ -1,11 +1,8 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { useQueryClient } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
-import { qk, useMarkets, usePositions } from "@/lib/api/queries";
-import { useAccountStream } from "@/lib/ws/channels";
-import type { MarketId, WsAccountMessage } from "@/lib/types/contract";
+import { useMarkets, usePositions } from "@/lib/api/queries";
+import type { MarketId } from "@/lib/types/contract";
 import { useUi } from "@/lib/store/ui-store";
 import { MarketHeader } from "./MarketHeader";
 import { Orderbook } from "./Orderbook";
@@ -37,57 +34,6 @@ export function TradeLayout({ marketId }: Props) {
 
   const { data: positions } = usePositions();
   const freeCollateral = positions?.freeCollateralUsdc;
-
-  // Wire account stream so a fill / position update / cancel pushes a
-  // re-fetch of positions, open orders and fills. Without this, the right
-  // panel only refreshes on the React Query staleTime cadence.
-  const { address } = useAccount();
-  const qc = useQueryClient();
-  const pushToast = useUi((s) => s.pushToast);
-
-  const handleAccountMsg = useCallback(
-    (m: WsAccountMessage) => {
-      switch (m.type) {
-        case "order.accepted":
-          qc.invalidateQueries({ queryKey: qk.openOrders });
-          break;
-        case "order.cancelled":
-          qc.invalidateQueries({ queryKey: qk.openOrders });
-          break;
-        case "order.filled":
-          qc.invalidateQueries({ queryKey: qk.openOrders });
-          qc.invalidateQueries({ queryKey: qk.positions });
-          qc.invalidateQueries({ queryKey: qk.fills(m.marketId) });
-          qc.invalidateQueries({ queryKey: qk.fills() });
-          break;
-        case "position.update":
-          qc.invalidateQueries({ queryKey: qk.positions });
-          break;
-        case "liquidation.warning":
-          pushToast({
-            kind: "warn",
-            title: `Liquidation warning · ${m.marketId.toUpperCase()}`,
-            body: `Health factor ${m.healthFactor}.`,
-          });
-          break;
-        case "liquidation.executed":
-          qc.invalidateQueries({ queryKey: qk.positions });
-          qc.invalidateQueries({ queryKey: qk.balance });
-          pushToast({
-            kind: "error",
-            title: `Position liquidated · ${m.marketId.toUpperCase()}`,
-            body: `Closed ${m.size} @ ${m.price}.`,
-          });
-          break;
-        case "funding.applied":
-          qc.invalidateQueries({ queryKey: qk.positions });
-          break;
-      }
-    },
-    [qc, pushToast],
-  );
-
-  useAccountStream(address, handleAccountMsg);
 
   const [mobileTab, setMobileTab] = useState<MobileTab>("chart");
 

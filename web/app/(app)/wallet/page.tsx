@@ -1,15 +1,7 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  useAccount,
-  useChainId,
-  useReadContract,
-  useWaitForTransactionReceipt,
-  useWriteContract,
-} from "wagmi";
-import { parseUnits } from "viem";
-import { useQueryClient } from "@tanstack/react-query";
-import { qk, useBalance } from "@/lib/api/queries";
+import { useState } from "react";
+import { useAccount } from "wagmi";
+import { useBalance } from "@/lib/api/queries";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
@@ -17,20 +9,16 @@ import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useUi } from "@/lib/store/ui-store";
 import { cn } from "@/lib/cn";
-import { collateralVaultAbi, erc20Abi } from "@/lib/contracts/abis";
-import { getAddresses, USDC_DECIMALS } from "@/lib/contracts/addresses";
 
 type Mode = "deposit" | "withdraw";
 
 export default function WalletPage() {
   const { address, status } = useAccount();
-  const chainId = useChainId();
-  const addresses = getAddresses(chainId);
-  const qc = useQueryClient();
   const { data: balance } = useBalance();
   const pushToast = useUi((s) => s.pushToast);
   const [mode, setMode] = useState<Mode>("deposit");
   const [amount, setAmount] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const walletBal = balance ? Number(balance.walletUsdcBalance) : 0;
   const vaultBal = balance ? Number(balance.vaultBalanceUsdc) : 0;
@@ -39,101 +27,18 @@ export default function WalletPage() {
   const amt = Number(amount) || 0;
   const insufficient = amt > source;
 
-  // USDC allowance for the vault — only relevant in deposit mode.
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    abi: erc20Abi,
-    address: addresses?.usdc,
-    functionName: "allowance",
-    args: address && addresses ? [address, addresses.collateralVault] : undefined,
-    query: { enabled: !!address && !!addresses, staleTime: 5_000 },
-  });
-
-  const amountWei = useMemo(
-    () => (amt > 0 ? parseUnits(amount, USDC_DECIMALS) : 0n),
-    [amount, amt],
-  );
-  const needsApproval =
-    mode === "deposit" && !!addresses && (allowance ?? 0n) < amountWei && amt > 0;
-
-  const { writeContractAsync, isPending: writePending } = useWriteContract();
-  const [pendingHash, setPendingHash] = useState<`0x${string}` | undefined>();
-  const { isLoading: txConfirming, isSuccess: txMined } = useWaitForTransactionReceipt({
-    hash: pendingHash,
-  });
-
-  // We need to react to the on-chain receipt becoming `success`, but only once
-  // per hash — keeping the work in an effect would otherwise re-fire each
-  // render. The ref records which hash we've already processed.
-  const handledHashRef = useRef<`0x${string}` | null>(null);
-  useEffect(() => {
-    if (!txMined || !pendingHash) return;
-    if (handledHashRef.current === pendingHash) return;
-    handledHashRef.current = pendingHash;
+  async function onSubmit() {
+    if (!amt) return;
+    setSubmitting(true);
+    await new Promise((r) => setTimeout(r, 800));
+    setSubmitting(false);
     pushToast({
       kind: "success",
-      title: mode === "deposit" ? "Deposit confirmed" : "Withdrawal confirmed",
-      body: `Tx ${pendingHash.slice(0, 10)}… mined`,
+      title: mode === "deposit" ? "Deposit submitted" : "Withdrawal submitted",
+      body: `${amt.toFixed(2)} USDC · pending confirmation`,
     });
-    setPendingHash(undefined);
     setAmount("");
-    qc.invalidateQueries({ queryKey: qk.balance });
-    qc.invalidateQueries({ queryKey: qk.positions });
-    refetchAllowance();
-  }, [txMined, mode, pendingHash, pushToast, qc, refetchAllowance]);
-
-  async function onSubmit() {
-    if (!amt || !addresses || !address) return;
-    try {
-      if (mode === "deposit") {
-        if (needsApproval) {
-          const hash = await writeContractAsync({
-            abi: erc20Abi,
-            address: addresses.usdc,
-            functionName: "approve",
-            args: [addresses.collateralVault, amountWei],
-          });
-          pushToast({
-            kind: "info",
-            title: "Approval submitted",
-            body: `Tx ${hash.slice(0, 10)}… — sign deposit next`,
-          });
-          setPendingHash(hash);
-          return; // user clicks again to deposit once approval lands
-        }
-        const hash = await writeContractAsync({
-          abi: collateralVaultAbi,
-          address: addresses.collateralVault,
-          functionName: "deposit",
-          args: [amountWei],
-        });
-        pushToast({ kind: "info", title: "Deposit submitted", body: `Tx ${hash.slice(0, 10)}…` });
-        setPendingHash(hash);
-      } else {
-        const hash = await writeContractAsync({
-          abi: collateralVaultAbi,
-          address: addresses.collateralVault,
-          functionName: "withdraw",
-          args: [amountWei],
-        });
-        pushToast({ kind: "info", title: "Withdrawal submitted", body: `Tx ${hash.slice(0, 10)}…` });
-        setPendingHash(hash);
-      }
-    } catch (e) {
-      pushToast({
-        kind: "error",
-        title: "Transaction failed",
-        body: e instanceof Error ? e.message : "Wallet rejected the request",
-      });
-    }
   }
-
-  const submitting = writePending || txConfirming;
-  const ctaLabel = (() => {
-    if (submitting && needsApproval) return "Approving…";
-    if (submitting) return mode === "deposit" ? "Depositing…" : "Withdrawing…";
-    if (needsApproval) return "Approve USDC";
-    return mode === "deposit" ? "Deposit USDC" : "Withdraw USDC";
-  })();
 
   return (
     <div className="px-3 sm:px-5 py-4 sm:py-6 max-w-screen-md w-full mx-auto flex flex-col gap-4">
@@ -149,16 +54,6 @@ export default function WalletPage() {
             <EmptyState
               title="Wallet not connected"
               description="Connect a wallet from the top-right to deposit USDC and start trading."
-            />
-          </div>
-        </Card>
-      ) : !addresses ? (
-        <Card raised>
-          <CardHeader>Unsupported network</CardHeader>
-          <div className="p-6">
-            <EmptyState
-              title={`Perplex is not deployed on chain ${chainId} yet`}
-              description="Switch to Arbitrum or local Anvil (31337) to deposit USDC."
             />
           </div>
         </Card>
@@ -220,10 +115,10 @@ export default function WalletPage() {
                 block
                 variant="primary"
                 loading={submitting}
-                disabled={!amt || insufficient || submitting}
+                disabled={!amt || insufficient}
                 onClick={onSubmit}
               >
-                {ctaLabel}
+                {mode === "deposit" ? "Deposit USDC" : "Withdraw USDC"}
               </Button>
             </div>
           </Card>

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Logo } from "./Logo";
 import { WalletButton } from "./WalletButton";
+import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { useUi } from "@/lib/store/ui-store";
 
 const NAV = [
@@ -50,6 +51,7 @@ export function TopNav() {
           })}
         </nav>
         <div className="flex-1" />
+        <ThemeToggle />
         <WalletButton />
       </div>
     </header>

@@ -225,8 +225,8 @@ html:has(.spark) {
 }
 .spark {
   --s-frame: #14100e;
-  --s-bg: #f6f4fb;
-  --s-bg-soft: #ecebf3;
+  --s-bg: #ffffff;
+  --s-bg-soft: #f4f3f8;
   --s-text: #0c0530;
   --s-text-mid: #5a5478;
   --s-text-soft: #8b86a6;
@@ -255,6 +255,44 @@ html:has(.spark) {
 .spark ::selection {
   background: rgba(255, 107, 26, 0.25);
   color: var(--s-text);
+}
+
+/* Spark light defaults */
+.spark {
+  --ring-stroke: #0c0530;
+}
+
+/* Dark theme overrides for spark (marketing) palette */
+html.dark .spark {
+  --ring-stroke: #ffffff;
+  --s-frame: #050409;
+  --s-bg: #0b0a14;
+  --s-bg-soft: #14121f;
+  --s-text: #f1eef9;
+  --s-text-mid: #b8b1d0;
+  --s-text-soft: #7e7896;
+  --s-line: rgba(255, 255, 255, 0.08);
+  --s-line-strong: rgba(255, 255, 255, 0.18);
+  --s-accent: #ff8a4a;
+  --s-accent-strong: #ff6b1a;
+  --s-accent-soft: rgba(255, 138, 74, 0.18);
+  --s-accent-tint: rgba(255, 138, 74, 0.10);
+  --s-yellow: #f5d76e;
+  --s-yellow-soft: rgba(245, 215, 110, 0.15);
+  --s-card: #14121f;
+}
+html.dark .spark-card {
+  background: var(--s-card);
+}
+html.dark body:has(.spark),
+html.dark html:has(.spark) {
+  background: var(--s-frame) !important;
+}
+html.dark body {
+  background:
+    radial-gradient(1200px 600px at 50% -200px, rgba(255, 107, 26, 0.10), transparent 60%),
+    radial-gradient(800px 500px at 90% -100px, rgba(255, 107, 26, 0.06), transparent 60%),
+    var(--bg-0);
 }
 .spark-card {
   background: var(--s-card);

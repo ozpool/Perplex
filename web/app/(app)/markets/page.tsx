@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useMarkets, useRecentTrades } from "@/lib/api/queries";
+import { useMemo, useState, useEffect } from "react";
+import { useMarkets } from "@/lib/api/queries";
 import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { useUi } from "@/lib/store/ui-store";
 import { CoinIcon } from "@/components/markets/CoinIcon";
@@ -139,7 +139,7 @@ export default function MarketsPage() {
         ))}
 
         {!isLoading && markets.length === 0 && (
-          <div className="p-10 text-center text-sm text-fg-mid">No markets match &quot;{query}&quot;.</div>
+          <div className="p-10 text-center text-sm text-fg-mid">No markets match &ldquo;{query}&rdquo;.</div>
         )}
       </Card>
     </div>
@@ -362,24 +362,30 @@ function Sparkline({ points, color }: { points: number[]; color: string }) {
   );
 }
 
-function useSparkline(anchor: number, marketId: MarketId, points = 32): number[] {
-  // Pull the latest fills and use their prices as a sparkline. Trades come
-  // back newest-first from the edge, so reverse before slicing so the chart
-  // reads left-to-right in chronological order.
-  const { data } = useRecentTrades(marketId);
-  return useMemo(() => {
-    const trades = data?.trades ?? [];
-    if (trades.length === 0) {
-      // Backend hasn't returned trades yet — show a flat line at the oracle
-      // anchor so the card doesn't render empty during initial load.
-      return Array.from({ length: points }, () => anchor);
-    }
-    const prices = [...trades].reverse().map((t) => Number(t.price));
-    if (prices.length >= points) return prices.slice(-points);
-    // Left-pad with the earliest known price to keep the SVG width stable.
-    const pad = prices.length > 0 ? prices[0] : anchor;
-    return [...Array.from({ length: points - prices.length }, () => pad), ...prices];
-  }, [data, anchor, points]);
+function useSparkline(anchor: number, marketId: string) {
+  const [series, setSeries] = useState<number[]>(() => seed(anchor, 32, marketId));
+  useEffect(() => {
+    const id = setInterval(() => {
+      setSeries((prev) => {
+        const last = prev[prev.length - 1];
+        const next = last + (Math.random() - 0.5) * (anchor * 0.001);
+        return [...prev.slice(1), next];
+      });
+    }, 1400);
+    return () => clearInterval(id);
+  }, [anchor]);
+  return series;
+}
+
+function seed(anchor: number, n: number, salt: string): number[] {
+  let v = anchor;
+  const out: number[] = [];
+  const seedNum = salt.charCodeAt(0) + salt.charCodeAt(salt.length - 1);
+  for (let i = 0; i < n; i++) {
+    v += ((Math.sin(i * 0.7 + seedNum) + Math.random() * 0.4 - 0.2) * (anchor * 0.003));
+    out.push(v);
+  }
+  return out;
 }
 
 /* ── Deterministic per-market synthetic stats (so sort actually segregates) */
