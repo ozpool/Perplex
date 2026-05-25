@@ -17,6 +17,8 @@ perplex-funding = { path = "../perplex-funding" }
 anyhow = { workspace = true }
 async-trait = "0.1"
 clap = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 reqwest = { workspace = true }
 rust_decimal = { workspace = true }
 serde = { workspace = true }

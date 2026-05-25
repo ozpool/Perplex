@@ -97,6 +97,9 @@ jobs:
       - name: 30-day synthetic replay
         run: pnpm sim:replay
 
+      - name: grafana dashboard smoke
+        run: pnpm smoke:grafana
+
   devnet-smoke:
     name: devnet smoke
     runs-on: ubuntu-latest
