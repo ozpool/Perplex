@@ -68,9 +68,8 @@ contract Deploy is Script {
 
         positionRegistry.setWiring(ICollateralVault(address(vault)), address(engine), liquidation);
 
-        SyntheticCounterparty counterparty = new SyntheticCounterparty(
-            owner, address(engine), address(usdc), address(vault)
-        );
+        SyntheticCounterparty counterparty =
+            new SyntheticCounterparty(owner, address(engine), address(usdc), address(vault));
         engine.setFillHook(address(counterparty));
         _seedCounterpartyCaps(counterparty);
 

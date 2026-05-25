@@ -133,13 +133,11 @@ contract SyntheticCounterparty is ISyntheticCounterparty, ReentrancyGuard {
     // -- fill hook ------------------------------------------------------------
 
     /// @inheritdoc IFillHook
-    function onFill(
-        address user,
-        bytes32 marketId,
-        int256 sizeDelta,
-        uint256 priceX18,
-        int256 _realisedPnl
-    ) external override onlySettlement {
+    function onFill(address user, bytes32 marketId, int256 sizeDelta, uint256 priceX18, int256 _realisedPnl)
+        external
+        override
+        onlySettlement
+    {
         // Only act when SettlementEngine reports a fill that names this contract as the
         // user side. Hook fires for every fill in the batch so we filter on identity
         // rather than relying on the operator to route only counterparty fills.

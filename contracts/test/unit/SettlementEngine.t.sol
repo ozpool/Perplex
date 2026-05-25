@@ -32,13 +32,10 @@ contract RecordingHook is IFillHook {
         return calls.length;
     }
 
-    function onFill(
-        address user,
-        bytes32 marketId,
-        int256 sizeDelta,
-        uint256 priceX18,
-        int256 realisedPnl
-    ) external override {
+    function onFill(address user, bytes32 marketId, int256 sizeDelta, uint256 priceX18, int256 realisedPnl)
+        external
+        override
+    {
         calls.push(Call(user, marketId, sizeDelta, priceX18, realisedPnl));
     }
 }

@@ -7,11 +7,6 @@ pragma solidity 0.8.24;
 ///         counterparty) and must not revert under normal operation — a revert aborts the
 ///         entire batch.
 interface IFillHook {
-    function onFill(
-        address user,
-        bytes32 marketId,
-        int256 sizeDelta,
-        uint256 priceX18,
-        int256 realisedPnl
-    ) external;
+    function onFill(address user, bytes32 marketId, int256 sizeDelta, uint256 priceX18, int256 realisedPnl)
+        external;
 }
