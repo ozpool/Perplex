@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/perplex-cli",
     "crates/perplex-core",
     "crates/perplex-diff-gen",
     "crates/perplex-edge",
@@ -10,7 +11,6 @@ members = [
     # additional crates land in their respective phases:
     #   "crates/perplex-settlement"  (Phase 2 — handled by Solidity SettlementEngine for now)
     #   "crates/perplex-liquidator"  (Phase 4)
-    #   "crates/perplex-cli"         (Phase 7)
     #   "crates/perplex-mock-oracle" (added when HTTP stub is wired)
 ]
 
