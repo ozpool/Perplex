@@ -23,6 +23,7 @@ export type Deployments = {
   PositionRegistry: Address;
   CollateralVault: Address;
   SettlementEngine: Address;
+  SyntheticCounterparty: Address;
   LiquidationEngine: Address;
   owner: Address;
   chainId: number;
