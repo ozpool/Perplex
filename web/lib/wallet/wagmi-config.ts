@@ -22,7 +22,10 @@ const isBrowser = typeof window !== "undefined";
 export const IS_DEV_PROFILE = process.env.NODE_ENV !== "production";
 
 const PROD_CHAINS = [arbitrum, arbitrumSepolia] as const;
-const DEV_CHAINS = [arbitrum, arbitrumSepolia, localAnvil] as const;
+// Dev profile keeps Anvil first so chain-keyed UI selectors (wallet pill label,
+// default-market filter) resolve to the local devnet rather than Arbitrum One
+// when the user is actually connected to Anvil. See #88.
+const DEV_CHAINS = [localAnvil, arbitrumSepolia, arbitrum] as const;
 
 export const APP_CHAINS = (IS_DEV_PROFILE ? DEV_CHAINS : PROD_CHAINS) as readonly [
   (typeof DEV_CHAINS)[number],
