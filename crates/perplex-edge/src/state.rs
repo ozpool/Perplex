@@ -349,7 +349,10 @@ fn default_markets() -> HashMap<String, MarketInfo> {
             taker_fee_bps: 5,
             maker_rebate_bps: -2,
             funding_interval_sec: 28_800,
-            index_price_x18: "150000000000000000000".into(),
+            // 200e18 — matches `prices[2]` in contracts/script/Deploy.s.sol::_seedPrices
+            // so the edge default agrees with the on-chain oracle on a fresh `make dev-up`.
+            // Bumped from 150e18; see #95.
+            index_price_x18: "200000000000000000000".into(),
         },
     );
     m
