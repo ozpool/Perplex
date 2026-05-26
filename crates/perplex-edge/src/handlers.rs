@@ -3,6 +3,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::auth::{issue_jwt, verify_siwe, AuthedUser};
@@ -174,32 +175,124 @@ pub async fn place_order(
     if !req.signature.starts_with("0x") || req.signature.len() < 132 {
         return Err(ApiError::InvalidSignature);
     }
-    let price = if req.order_type == "market" {
-        "0".to_string()
+    let limit_price = if req.order_type == "limit" {
+        Some(
+            req.price
+                .clone()
+                .ok_or_else(|| ApiError::BadRequest("limit requires price".into()))?,
+        )
     } else {
-        req.price
-            .clone()
-            .ok_or_else(|| ApiError::BadRequest("limit requires price".into()))?
+        None
     };
+
+    let taker_qty: Decimal = req
+        .qty
+        .parse()
+        .map_err(|_| ApiError::BadRequest("invalid qty".into()))?;
+    if taker_qty.is_zero() {
+        return Err(ApiError::BadRequest("qty must be > 0".into()));
+    }
+    let taker_price: Option<Decimal> = match &limit_price {
+        Some(p) => Some(
+            p.parse()
+                .map_err(|_| ApiError::BadRequest("invalid price".into()))?,
+        ),
+        None => None,
+    };
+
     let order_id = format!("ord_{}", ulid::Ulid::new());
     let ts_ns = now_ns().to_string();
-    state.add_open_order(
-        &user.address,
-        OpenOrder {
-            id: order_id.clone(),
-            market_id: req.market_id,
-            side: req.side,
-            order_type: req.order_type,
-            price,
-            qty: req.qty.clone(),
-            remaining: req.qty,
-            ts_ns: ts_ns.clone(),
-            client_order_id: req.client_order_id,
-        },
-    );
+
+    // Cross against the resting book. Maker orders are decremented in place and
+    // the public orderbook snapshot is rebuilt by `match_taker`.
+    let matches = state.match_taker(&req.market_id, &req.side, taker_price, taker_qty);
+    let filled_qty: Decimal = matches.iter().map(|m| m.qty).sum();
+    let taker_remaining = taker_qty - filled_qty;
+    let taker_side = req.side.clone();
+    let maker_side = if taker_side == "buy" { "sell" } else { "buy" };
+
+    for m in &matches {
+        let price_str = m.price.normalize().to_string();
+        let qty_str = m.qty.normalize().to_string();
+        let ts_str = m.ts_ns.to_string();
+
+        state.record_fill(
+            &user.address,
+            FillInfo {
+                id: format!("fil_{}", ulid::Ulid::new()),
+                order_id: order_id.clone(),
+                market_id: req.market_id.clone(),
+                side: taker_side.clone(),
+                price: price_str.clone(),
+                qty: qty_str.clone(),
+                fee_usdc: "0".into(),
+                role: "taker".into(),
+                ts_ns: ts_str.clone(),
+                tx_hash: String::new(),
+            },
+        );
+        state.record_fill(
+            &m.maker_address,
+            FillInfo {
+                id: format!("fil_{}", ulid::Ulid::new()),
+                order_id: m.maker_order_id.clone(),
+                market_id: req.market_id.clone(),
+                side: maker_side.to_string(),
+                price: price_str.clone(),
+                qty: qty_str.clone(),
+                fee_usdc: "0".into(),
+                role: "maker".into(),
+                ts_ns: ts_str.clone(),
+                tx_hash: String::new(),
+            },
+        );
+        state.record_trade(
+            &req.market_id,
+            PublicTrade {
+                id: format!("trd_{}", ulid::Ulid::new()),
+                market_id: req.market_id.clone(),
+                price: price_str,
+                qty: qty_str,
+                side: taker_side.clone(),
+                ts_ns: ts_str,
+            },
+        );
+
+        state.upsert_position(&user.address, &req.market_id, &taker_side, m.qty, m.price);
+        state.upsert_position(&m.maker_address, &req.market_id, maker_side, m.qty, m.price);
+    }
+
+    // Rest leftover liquidity for limit orders only. Market orders with a
+    // remainder are dropped (no resting at price 0).
+    if !taker_remaining.is_zero() && req.order_type == "limit" {
+        let price = limit_price.clone().unwrap_or_else(|| "0".to_string());
+        state.add_open_order(
+            &user.address,
+            OpenOrder {
+                id: order_id.clone(),
+                market_id: req.market_id.clone(),
+                side: req.side.clone(),
+                order_type: req.order_type.clone(),
+                price,
+                qty: req.qty.clone(),
+                remaining: taker_remaining.normalize().to_string(),
+                ts_ns: ts_ns.clone(),
+                client_order_id: req.client_order_id.clone(),
+            },
+        );
+    }
+
+    let status = if !matches.is_empty() && taker_remaining.is_zero() {
+        "filled"
+    } else if !matches.is_empty() {
+        "partial"
+    } else {
+        "accepted"
+    };
+
     Ok(Json(PlaceOrderResponse {
         order_id,
-        status: "accepted".into(),
+        status: status.into(),
         ts_ns,
     }))
 }
