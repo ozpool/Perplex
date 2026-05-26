@@ -2,11 +2,12 @@
 //! deterministic harness without standing up Postgres or Redis. Production deploys keep the
 //! same shapes but back them by external stores.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::RwLock;
+use rust_decimal::Decimal;
 
 use crate::types::{FillInfo, MarketInfo, OpenOrder, PositionInfo, PublicTrade};
 
@@ -120,22 +121,83 @@ impl AppState {
     }
 
     pub fn add_open_order(&self, address: &str, order: OpenOrder) {
+        let market_id = order.market_id.clone();
         self.inner
             .open_orders
             .write()
             .entry(address.to_string())
             .or_default()
             .push(order);
+        self.rebuild_orderbook(&market_id);
     }
 
     pub fn cancel_order(&self, address: &str, order_id: &str) -> bool {
         let mut g = self.inner.open_orders.write();
-        if let Some(list) = g.get_mut(address) {
+        let market_id = g
+            .get(address)
+            .and_then(|list| list.iter().find(|o| o.id == order_id))
+            .map(|o| o.market_id.clone());
+        let changed = if let Some(list) = g.get_mut(address) {
             let before = list.len();
             list.retain(|o| o.id != order_id);
-            return list.len() != before;
+            list.len() != before
+        } else {
+            false
+        };
+        drop(g);
+        if let Some(mid) = market_id {
+            self.rebuild_orderbook(&mid);
         }
-        false
+        changed
+    }
+
+    /// Recomputes the public orderbook snapshot for `market_id` by aggregating the remaining
+    /// quantity of every resting limit order across all users. Called after every
+    /// `add_open_order` or `cancel_order` so the snapshot served by `/v1/orderbook/:market_id`
+    /// reflects the current resting state. Market orders (price = "0") are skipped because they
+    /// never rest.
+    pub fn rebuild_orderbook(&self, market_id: &str) {
+        let orders = self.inner.open_orders.read();
+        let mut bids: BTreeMap<Decimal, Decimal> = BTreeMap::new();
+        let mut asks: BTreeMap<Decimal, Decimal> = BTreeMap::new();
+        for list in orders.values() {
+            for o in list.iter().filter(|o| o.market_id == market_id) {
+                if o.order_type != "limit" {
+                    continue;
+                }
+                let price = match o.price.parse::<Decimal>() {
+                    Ok(p) if !p.is_zero() => p,
+                    _ => continue,
+                };
+                let qty = match o.remaining.parse::<Decimal>() {
+                    Ok(q) if !q.is_zero() => q,
+                    _ => continue,
+                };
+                let bucket = if o.side == "buy" {
+                    &mut bids
+                } else {
+                    &mut asks
+                };
+                bucket.entry(price).and_modify(|v| *v += qty).or_insert(qty);
+            }
+        }
+        drop(orders);
+
+        let to_levels = |b: BTreeMap<Decimal, Decimal>, descending: bool| -> Vec<[String; 2]> {
+            let mut v: Vec<_> = b.into_iter().collect();
+            if descending {
+                v.reverse();
+            }
+            v.into_iter()
+                .map(|(p, q)| [p.normalize().to_string(), q.normalize().to_string()])
+                .collect()
+        };
+
+        let mut books = self.inner.orderbooks.write();
+        let entry = books.entry(market_id.to_string()).or_default();
+        entry.sequence = entry.sequence.saturating_add(1);
+        entry.bids = to_levels(bids, true);
+        entry.asks = to_levels(asks, false);
     }
 
     pub fn positions_for(&self, address: &str) -> Vec<PositionInfo> {
@@ -306,4 +368,88 @@ fn default_books() -> HashMap<String, BookSnapshot> {
         );
     }
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn order(id: &str, side: &str, price: &str, remaining: &str) -> OpenOrder {
+        OpenOrder {
+            id: id.into(),
+            market_id: "btc-usd".into(),
+            side: side.into(),
+            order_type: "limit".into(),
+            price: price.into(),
+            qty: remaining.into(),
+            remaining: remaining.into(),
+            ts_ns: "0".into(),
+            client_order_id: None,
+        }
+    }
+
+    #[test]
+    fn place_rebuilds_snapshot_with_bid_and_ask() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xmaker", order("o1", "buy", "99950", "0.1"));
+        state.add_open_order("0xtaker", order("o2", "sell", "100050", "0.2"));
+        let snap = state.orderbook("btc-usd").expect("snapshot exists");
+        assert_eq!(snap.bids, vec![["99950".to_string(), "0.1".to_string()]]);
+        assert_eq!(snap.asks, vec![["100050".to_string(), "0.2".to_string()]]);
+        assert!(snap.sequence >= 2);
+    }
+
+    #[test]
+    fn rebuild_sums_quantity_at_same_price() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xa", order("o1", "buy", "99950", "0.1"));
+        state.add_open_order("0xb", order("o2", "buy", "99950", "0.4"));
+        let snap = state.orderbook("btc-usd").unwrap();
+        assert_eq!(snap.bids, vec![["99950".to_string(), "0.5".to_string()]]);
+    }
+
+    #[test]
+    fn rebuild_sorts_bids_desc_asks_asc() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xa", order("o1", "buy", "99000", "0.1"));
+        state.add_open_order("0xa", order("o2", "buy", "99500", "0.1"));
+        state.add_open_order("0xa", order("o3", "sell", "101000", "0.1"));
+        state.add_open_order("0xa", order("o4", "sell", "100500", "0.1"));
+        let snap = state.orderbook("btc-usd").unwrap();
+        assert_eq!(
+            snap.bids,
+            vec![
+                ["99500".to_string(), "0.1".to_string()],
+                ["99000".to_string(), "0.1".to_string()],
+            ]
+        );
+        assert_eq!(
+            snap.asks,
+            vec![
+                ["100500".to_string(), "0.1".to_string()],
+                ["101000".to_string(), "0.1".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn cancel_removes_order_from_snapshot() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xa", order("o1", "buy", "99950", "0.1"));
+        state.add_open_order("0xa", order("o2", "buy", "99950", "0.4"));
+        assert!(state.cancel_order("0xa", "o2"));
+        let snap = state.orderbook("btc-usd").unwrap();
+        assert_eq!(snap.bids, vec![["99950".to_string(), "0.1".to_string()]]);
+    }
+
+    #[test]
+    fn market_orders_do_not_rest_in_snapshot() {
+        let state = AppState::new(b"test".to_vec());
+        let mut market = order("o1", "buy", "0", "0.1");
+        market.order_type = "market".into();
+        state.add_open_order("0xa", market);
+        let snap = state.orderbook("btc-usd").unwrap();
+        assert!(snap.bids.is_empty());
+        assert!(snap.asks.is_empty());
+    }
 }
