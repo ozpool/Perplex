@@ -14,7 +14,8 @@ import type {
   TradesResponse,
 } from "@/lib/types/contract";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const BASE = API_BASE;
 
 function authHeaders(): HeadersInit {
   if (typeof window === "undefined") return {};
