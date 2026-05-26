@@ -29,10 +29,13 @@ export interface TapeMarketSpec {
   annualVol: number;
 }
 
+// Start prices kept in lockstep with `contracts/script/Deploy.s.sol::_seedPrices`
+// so a freshly bootstrapped local stack and the synthetic replay agree on day-zero
+// marks. See #95. If you bump the on-chain seed, bump these too.
 export const DEFAULT_MARKETS: TapeMarketSpec[] = [
-  { market: "btc-usd", binanceSymbol: "BTCUSDT", startPrice: 60_000, annualVol: 0.55 },
-  { market: "eth-usd", binanceSymbol: "ETHUSDT", startPrice: 3_000, annualVol: 0.70 },
-  { market: "sol-usd", binanceSymbol: "SOLUSDT", startPrice: 150, annualVol: 0.90 },
+  { market: "btc-usd", binanceSymbol: "BTCUSDT", startPrice: 100_000, annualVol: 0.55 },
+  { market: "eth-usd", binanceSymbol: "ETHUSDT", startPrice: 3_500, annualVol: 0.70 },
+  { market: "sol-usd", binanceSymbol: "SOLUSDT", startPrice: 200, annualVol: 0.90 },
 ];
 
 const ONE_MIN_MS = 60_000;
