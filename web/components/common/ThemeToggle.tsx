@@ -22,11 +22,15 @@ interface Props {
 }
 
 export function ThemeToggle({ variant = "app" }: Props) {
-  const [theme, setTheme] = useState<Theme>(() => readInitial());
+  const [theme, setTheme] = useState<Theme>("light");
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    const t = readInitial();
+    setTheme(t);
+    applyTheme(t);
+    setMounted(true);
+  }, []);
 
   const toggle = () => {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -48,7 +52,7 @@ export function ThemeToggle({ variant = "app" }: Props) {
         suppressHydrationWarning
         className="inline-flex items-center justify-center size-12 rounded-full bg-[var(--s-card)] border border-[var(--s-line)] text-[var(--s-text)] hover:text-[var(--s-accent)] transition-colors shadow-[0_1px_0_rgba(15,8,52,0.04),0_4px_18px_-10px_rgba(15,8,52,0.22)]"
       >
-        {isDark ? <SunIcon /> : <MoonIcon />}
+        {mounted && isDark ? <SunIcon /> : <MoonIcon />}
       </button>
     );
   }
@@ -62,7 +66,7 @@ export function ThemeToggle({ variant = "app" }: Props) {
       suppressHydrationWarning
       className="inline-flex items-center justify-center size-9 rounded-[var(--radius-sm)] border border-border text-fg-mid hover:text-fg hover:bg-bg-2 transition-colors"
     >
-      {isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+      {mounted && isDark ? <SunIcon size={16} /> : <MoonIcon size={16} />}
     </button>
   );
 }

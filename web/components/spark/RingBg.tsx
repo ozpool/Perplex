@@ -61,7 +61,7 @@ export function RingBg() {
           return (
             <g
               key={c.symbol}
-              className={outerCls}
+              className={outerCls + " orbit-coin"}
               style={{
                 ["--orbit-dur" as string]: `${c.dur}s`,
                 animationDelay: `${delay}s`,
