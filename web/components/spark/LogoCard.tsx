@@ -58,7 +58,7 @@ export function LogoCard() {
         <span className="size-1.5 rounded-full bg-[#1ad094] pulse-dot" />
       </div>
       <div className="font-mono text-[18px] font-semibold tabular-nums text-[var(--s-text)] leading-none">
-        ${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        ${price.toLocaleString("en-US", { maximumFractionDigits: 2 })}
       </div>
       <div className="flex items-center justify-between mt-1.5">
         <span className="font-mono text-[11px]" style={{ color: stroke }}>

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -37,10 +38,14 @@ const themeInit = `(function(){try{var k='perplex-theme';var s=localStorage.getI
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} ${jbMono.variable} ${spaceGrotesk.variable} h-full antialiased`} suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInit }} />
-      </head>
       <body className="min-h-dvh flex flex-col" suppressHydrationWarning>
+        {/* Read the persisted theme out of localStorage and apply the class to
+            <html> before paint, so the page never flashes the wrong theme.
+            next/script with `beforeInteractive` is the React-19-safe way to
+            ship an inline script in the App Router. */}
+        <Script id="perplex-theme-init" strategy="beforeInteractive">
+          {themeInit}
+        </Script>
         <Providers>{children}</Providers>
       </body>
     </html>
