@@ -205,6 +205,18 @@ pub async fn place_order(
 
     // Cross against the resting book. Maker orders are decremented in place and
     // the public orderbook snapshot is rebuilt by `match_taker`.
+    // post_only orders must rest as maker; if matching would consume any
+    // resting liquidity the order is rejected outright (no partial fill, no
+    // resting remainder). This is what every CEX does and what the bot's
+    // strategy relies on to avoid accidentally taking its own counter-quotes.
+    if req.post_only {
+        let probe = state.match_taker_probe(&req.market_id, &req.side, taker_price, taker_qty);
+        if probe > Decimal::ZERO {
+            return Err(ApiError::BadRequest(
+                "post_only order would cross resting liquidity".into(),
+            ));
+        }
+    }
     let resting_summary = state.resting_orders_summary(&req.market_id);
     let matches = state.match_taker(&req.market_id, &req.side, taker_price, taker_qty);
     let filled_qty: Decimal = matches.iter().map(|m| m.qty).sum();
