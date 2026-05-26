@@ -45,10 +45,13 @@ impl Topic {
     }
 
     /// Bind the topic to a concrete user address (private channels only).
+    /// Addresses are lowercased so subscribe-side (JWT subject) and
+    /// publish-side (state mutation) always hash to the same bucket.
     pub fn with_user(&self, address: &str) -> Self {
+        let addr = address.to_lowercase();
         match self {
-            Topic::UserFills(_) => Topic::UserFills(address.to_string()),
-            Topic::UserPositions(_) => Topic::UserPositions(address.to_string()),
+            Topic::UserFills(_) => Topic::UserFills(addr),
+            Topic::UserPositions(_) => Topic::UserPositions(addr),
             other => other.clone(),
         }
     }

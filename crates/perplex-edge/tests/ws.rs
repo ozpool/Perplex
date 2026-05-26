@@ -113,8 +113,10 @@ async fn private_channel_requires_auth() {
     let v: serde_json::Value = serde_json::from_str(&frame.into_text().unwrap()).unwrap();
     assert_eq!(v["type"], "error");
 
-    // Authenticate, then re-subscribe.
-    let addr = "0x000000000000000000000000000000000000aBcD";
+    // Authenticate, then re-subscribe. JWT subject is lowercased server-side
+    // and WS publish keys hash on the lowercased address — use that form here
+    // so publish topic and subscribe topic match.
+    let addr = "0x000000000000000000000000000000000000abcd";
     let (jwt, _) = issue_jwt(state.jwt_secret(), addr).unwrap();
     client
         .send(WsMsg::Text(format!(r#"{{"op":"auth","token":"{}"}}"#, jwt)))

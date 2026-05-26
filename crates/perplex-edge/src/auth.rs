@@ -28,8 +28,12 @@ pub fn issue_jwt(secret: &[u8], address: &str) -> Result<(String, u64), ApiError
         .map_err(|_| ApiError::Internal("clock".into()))?
         .as_secs();
     let exp = now + JWT_TTL_SECS;
+    // Normalize the subject to lowercase so every downstream state key
+    // (positions, vault, open orders) compares equal regardless of whether the
+    // upstream gave us an EIP-55 checksum or a lowercased address. Ethereum
+    // addresses are case-insensitive at the protocol layer.
     let claims = Claims {
-        sub: address.to_string(),
+        sub: address.to_lowercase(),
         exp,
         iat: now,
     };
@@ -81,7 +85,7 @@ where
             .ok_or_else(|| ApiError::Unauthorized("bad scheme".into()))?;
         let claims = verify_jwt(app_state.jwt_secret(), token)?;
         Ok(AuthedUser {
-            address: claims.sub,
+            address: claims.sub.to_lowercase(),
         })
     }
 }

@@ -61,23 +61,16 @@ export function CelebrationOverlay() {
             }}
           >
             <svg
-              width="30"
-              height="30"
+              width="34"
+              height="34"
               viewBox="0 0 32 32"
               fill="none"
-              stroke="#fff"
-              strokeWidth="3.4"
+              stroke="#ffffff"
+              strokeWidth="3.6"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path
-                d="M7 17l5.5 5L25 10"
-                style={{
-                  strokeDasharray: 30,
-                  strokeDashoffset: 30,
-                  animation: "celebrationTickDraw 420ms 220ms cubic-bezier(0.6, 0, 0.4, 1) both",
-                }}
-              />
+              <path className="celebration-tick" d="M7 17l5.5 5L25 10" />
             </svg>
           </span>
         </div>

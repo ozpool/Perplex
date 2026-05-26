@@ -47,7 +47,16 @@ export function useOpenOrders() {
 }
 
 export function usePositions() {
-  return useQuery({ queryKey: qk.positions, queryFn: api.positions, staleTime: 1_000 });
+  return useQuery({
+    queryKey: qk.positions,
+    queryFn: api.positions,
+    staleTime: 1_000,
+    // Safety net: even if `invalidateQueries` after a fill is missed (WS
+    // account stream lag, error in mutation onSuccess, hot reload), the
+    // positions panel still picks up server state within 2s. Cheap call —
+    // edge serves it from in-memory state.
+    refetchInterval: 2_000,
+  });
 }
 
 export function useFills(marketId?: MarketId) {
