@@ -159,7 +159,14 @@ body {
 }
 
 @keyframes celebrationTickDraw {
-  to { stroke-dashoffset: 0; }
+  from { stroke-dashoffset: 32; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.celebration-tick {
+  stroke-dasharray: 32;
+  stroke-dashoffset: 32;
+  animation: celebrationTickDraw 420ms 180ms cubic-bezier(0.6, 0, 0.4, 1) forwards;
 }
 
 @keyframes celebrationBackdrop {

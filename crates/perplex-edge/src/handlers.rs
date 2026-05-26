@@ -208,6 +208,16 @@ pub async fn place_order(
     let matches = state.match_taker(&req.market_id, &req.side, taker_price, taker_qty);
     let filled_qty: Decimal = matches.iter().map(|m| m.qty).sum();
     let taker_remaining = taker_qty - filled_qty;
+    tracing::info!(
+        market = %req.market_id,
+        taker = %user.address,
+        side = %req.side,
+        order_type = %req.order_type,
+        qty = %taker_qty,
+        filled = %filled_qty,
+        match_count = matches.len(),
+        "place_order match outcome"
+    );
     let taker_side = req.side.clone();
     let maker_side = if taker_side == "buy" { "sell" } else { "buy" };
 
@@ -398,7 +408,7 @@ pub async fn siwe_verify(
     State(state): State<AppState>,
     Json(req): Json<SiweVerifyRequest>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
-    let address = verify_siwe(&req.message, &req.signature, &state)?;
+    let address = verify_siwe(&req.message, &req.signature, &state)?.to_lowercase();
     state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
@@ -431,6 +441,7 @@ pub async fn dev_token(
     State(state): State<AppState>,
     Path(address): Path<String>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
+    let address = address.to_lowercase();
     state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
