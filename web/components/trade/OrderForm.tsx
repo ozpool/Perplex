@@ -1,7 +1,7 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useSignTypedData, useConnect } from "wagmi";
-import type { Market, MarketId, OrderRequest, Side, TimeInForce } from "@/lib/types/contract";
+import type { Market, MarketId, OrderRequest, OrderType, Side, TimeInForce } from "@/lib/types/contract";
 import { usePlaceOrder } from "@/lib/api/queries";
 import { useLiveOracle } from "@/lib/ws/channels";
 import { Button } from "@/components/ui/Button";
@@ -57,9 +57,17 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const tickDec = market ? Math.max(2, decOf(market.tickSize)) : 2;
   const lotDec = market ? decOf(market.lotSize) : 4;
 
-  if (type === "limit" && !priceInput && markPx) {
-    setPriceInput(markPx.toFixed(tickDec));
-  }
+  // Prefill the limit price with the current mark exactly once per
+  // market->limit transition. The previous render-time `if (!priceInput)`
+  // fought user input: backspacing to empty triggered an immediate refill,
+  // so the field snapped back to the mark mid-edit. Tracked in #116.
+  const lastTypeRef = useRef<OrderType | null>(null);
+  useEffect(() => {
+    if (type === "limit" && lastTypeRef.current !== "limit" && markPx != null) {
+      setPriceInput(markPx.toFixed(tickDec));
+    }
+    lastTypeRef.current = type;
+  }, [type, markPx, tickDec]);
 
   const effPrice = useMemo(() => {
     if (type === "market") return markPx ?? 0;
