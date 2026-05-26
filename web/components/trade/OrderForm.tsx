@@ -49,18 +49,23 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const [postOnly, setPostOnly] = useState(false);
 
   const oraclePx = oracle ? Number(oracle.priceX18) : null;
+  // Fallback when the oracle WS hasn't ticked yet (no relayer running locally):
+  // /v1/markets always carries the seed price as an x18 integer. Down-scale and
+  // use it so the ticket math (quick-percent buttons, optimistic price) has a
+  // sane anchor even before the first WS oracle frame. See #112.
+  const markPx = oraclePx ?? (market ? Number(market.indexPriceX18) / 1e18 : null);
   const tickDec = market ? Math.max(2, decOf(market.tickSize)) : 2;
   const lotDec = market ? decOf(market.lotSize) : 4;
 
-  if (type === "limit" && !priceInput && oraclePx) {
-    setPriceInput(oraclePx.toFixed(tickDec));
+  if (type === "limit" && !priceInput && markPx) {
+    setPriceInput(markPx.toFixed(tickDec));
   }
 
   const effPrice = useMemo(() => {
-    if (type === "market") return oraclePx ?? 0;
+    if (type === "market") return markPx ?? 0;
     const n = Number(priceInput);
     return Number.isFinite(n) ? n : 0;
-  }, [type, priceInput, oraclePx]);
+  }, [type, priceInput, markPx]);
 
   const qty = Number(qtyInput) || 0;
   const notional = effPrice * qty;
@@ -86,7 +91,7 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
     const nonce = nowTsNs();
     const orderTs = nonce;
 
-    const optimisticPrice = type === "market" ? (oraclePx ?? 0).toFixed(tickDec) : priceInput;
+    const optimisticPrice = type === "market" ? (markPx ?? 0).toFixed(tickDec) : priceInput;
     const optimisticQty = qty.toFixed(lotDec);
 
     addOpt({
