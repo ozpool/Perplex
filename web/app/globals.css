@@ -171,6 +171,22 @@ body {
   animation: orbitSpin var(--orbit-dur, 30s) linear infinite;
 }
 
+/* Default-blur coins; sharpen on hover */
+.orbit-coin {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.orbit-coin > g {
+  filter: blur(5px);
+  opacity: 0.45;
+  transition: filter 0.35s ease, opacity 0.35s ease;
+}
+.orbit-coin:hover > g {
+  filter: blur(0);
+  opacity: 1;
+}
+
+
 .panel {
   background: var(--bg-1);
   border: 1px solid var(--border);
@@ -304,10 +320,10 @@ html.dark body {
 
 @keyframes sparkFloat {
   0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-8px) rotate(0.6deg); }
+  50% { transform: translateY(-20px) rotate(1.4deg); }
 }
-.spark-float-slow { animation: sparkFloat 7s ease-in-out infinite; }
-.spark-float-fast { animation: sparkFloat 5s ease-in-out infinite; }
+.spark-float-slow { animation: sparkFloat 6s ease-in-out infinite; }
+.spark-float-fast { animation: sparkFloat 4.2s ease-in-out infinite; }
 
 /* Subtle noise overlay for marketing surface */
 .marketing-noise::before {

@@ -1,6 +1,8 @@
 "use client";
 import { useAccount, useConnect, useDisconnect, useChainId } from "wagmi";
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
+import { cn } from "@/lib/cn";
 
 function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
