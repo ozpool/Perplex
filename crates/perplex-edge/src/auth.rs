@@ -121,9 +121,3 @@ fn parse_siwe_nonce(msg: &str) -> Option<String> {
         .find(|l| l.starts_with("Nonce: "))
         .map(|l| l.trim_start_matches("Nonce: ").trim().to_string())
 }
-
-/// Tiny helper for unit tests: build a Authorization header value for the given address.
-pub fn dev_bearer(state: &AppState, address: &str) -> String {
-    let (jwt, _) = issue_jwt(state.jwt_secret(), address).expect("issue");
-    format!("Bearer {jwt}")
-}

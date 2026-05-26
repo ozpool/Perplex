@@ -29,8 +29,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Default to a useful info-level filter when RUST_LOG is unset; the previous
+    // `from_default_env()` silently fell back to ERROR-only and made the server
+    // look hung on first boot. See #94.
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,perplex_edge=info,tower_http=info")),
+        )
         .json()
         .init();
 

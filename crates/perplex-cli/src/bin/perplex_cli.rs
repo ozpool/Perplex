@@ -91,8 +91,15 @@ struct QuoteArgs {
     /// Skip cancel/replace when the mid moves by less than this many bps.
     #[arg(long, env = "PERPLEX_REPRICE_THRESHOLD_BPS", default_value_t = 1)]
     reprice_threshold_bps: u32,
-    /// Dev signature padding accepted by the edge. Replaced by EIP-712 signing in prod.
-    #[arg(long, env = "PERPLEX_ORDER_SIGNATURE", default_value = "0x00")]
+    /// Dev signature padding accepted by the edge (must be 0x + 130 hex chars = 132 total
+    /// to pass the edge's length guard). The default is a 132-char zero placeholder; shorter
+    /// values are zero-padded by `expand_signature` for back-compat. Replaced by EIP-712
+    /// signing in prod. See #93.
+    #[arg(
+        long,
+        env = "PERPLEX_ORDER_SIGNATURE",
+        default_value_t = format!("0x{}", "0".repeat(130))
+    )]
     order_signature: String,
     /// Prometheus exporter bind address (host:port). Empty to disable.
     #[arg(long, env = "PERPLEX_METRICS_BIND", default_value = "0.0.0.0:9100")]
