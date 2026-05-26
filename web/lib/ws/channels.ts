@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getWsClient } from "./client";
+import { api } from "@/lib/api/rest";
 import type {
   MarketId,
   OrderbookLevel,
@@ -11,6 +12,14 @@ import type {
   WsOrderbookSnapshot,
   WsTrade,
 } from "@/lib/types/contract";
+
+// Poll the REST orderbook snapshot until edge starts publishing WS frames.
+// PR #97 wired the in-memory orderbook to /v1/orderbook but the matching
+// `orderbook.<market>` WS publish was deferred — without polling, /trade
+// shows an empty book even though the REST snapshot is populated.
+// Remove this once the WS publish lands and the hook can rely on the WS
+// stream alone (tracked under v1.1 milestone).
+const ORDERBOOK_REST_POLL_MS = 1500;
 
 // Maintain a sorted ladder; map keyed by price string for cheap upserts.
 function applyDelta(book: Map<string, string>, levels: OrderbookLevel[]) {
@@ -93,7 +102,26 @@ export function useLiveOrderbook(marketId: MarketId): LiveOrderbook | null {
     });
 
     ws.subscribe(channel);
+
+    let cancelled = false;
+    const seedFromRest = async () => {
+      try {
+        const snap = await api.orderbook(marketId, 200);
+        if (cancelled || snap.marketId !== marketId) return;
+        bidsRef.current = new Map(snap.bids);
+        asksRef.current = new Map(snap.asks);
+        seqRef.current = snap.sequence;
+        scheduleFlush(snap.tsNs);
+      } catch {
+        // edge transient — next tick will retry
+      }
+    };
+    seedFromRest();
+    const restPoll = setInterval(seedFromRest, ORDERBOOK_REST_POLL_MS);
+
     return () => {
+      cancelled = true;
+      clearInterval(restPoll);
       ws.unsubscribe(channel);
       off();
     };
