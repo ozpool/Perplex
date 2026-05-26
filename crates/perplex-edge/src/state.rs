@@ -297,6 +297,54 @@ impl AppState {
         (bids, asks)
     }
 
+    /// Read-only sibling of `match_taker`: returns the quantity that *would*
+    /// match without mutating any state. Used by the post_only guard so we can
+    /// reject crossing orders before they decrement maker books.
+    pub fn match_taker_probe(
+        &self,
+        market_id: &str,
+        taker_side: &str,
+        taker_price: Option<Decimal>,
+        taker_qty: Decimal,
+    ) -> Decimal {
+        let opp_side = if taker_side == "buy" { "sell" } else { "buy" };
+        let orders = self.inner.open_orders.read();
+        let mut remaining = taker_qty;
+        let mut filled = Decimal::ZERO;
+        // Walk every candidate maker; price-time ordering doesn't change
+        // *total* match qty so we skip the sort.
+        for list in orders.values() {
+            for o in list.iter() {
+                if remaining.is_zero() {
+                    return filled;
+                }
+                if o.market_id != market_id || o.side != opp_side || o.order_type != "limit" {
+                    continue;
+                }
+                let price = match o.price.parse::<Decimal>() {
+                    Ok(p) if !p.is_zero() => p,
+                    _ => continue,
+                };
+                let rem = match o.remaining.parse::<Decimal>() {
+                    Ok(r) if !r.is_zero() => r,
+                    _ => continue,
+                };
+                if let Some(tp) = taker_price {
+                    if taker_side == "buy" && price > tp {
+                        continue;
+                    }
+                    if taker_side == "sell" && price < tp {
+                        continue;
+                    }
+                }
+                let take = remaining.min(rem);
+                filled += take;
+                remaining -= take;
+            }
+        }
+        filled
+    }
+
     pub fn match_taker(
         &self,
         market_id: &str,
@@ -410,6 +458,14 @@ impl AppState {
         price: Decimal,
     ) {
         let new_side = if order_side == "buy" { "long" } else { "short" };
+        tracing::info!(
+            %address,
+            market = %market_id,
+            order_side,
+            qty = %qty,
+            price = %price,
+            "upsert_position"
+        );
         let mut positions = self.inner.positions.write();
         let list = positions.entry(address.to_string()).or_default();
         let idx = list.iter().position(|p| p.market_id == market_id);
