@@ -337,6 +337,9 @@ pub async fn list_positions(
     State(state): State<AppState>,
     user: AuthedUser,
 ) -> Result<Json<PositionsResponse>, ApiError> {
+    // Lazy seed covers wallets that minted a JWT before dev-seed was wired
+    // (cached localStorage tokens). No-op in prod.
+    state.seed_dev_vault(&user.address);
     let positions = state.positions_for(&user.address);
     let collateral = state.vault_balance(&user.address);
     Ok(Json(PositionsResponse {
@@ -411,6 +414,7 @@ pub async fn get_balance(
     State(state): State<AppState>,
     user: AuthedUser,
 ) -> Result<Json<BalanceResponse>, ApiError> {
+    state.seed_dev_vault(&user.address);
     Ok(Json(BalanceResponse {
         vault_balance_usdc: state.vault_balance(&user.address),
         wallet_usdc_balance: "0".into(),
