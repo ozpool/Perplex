@@ -22,11 +22,10 @@ export class PerplexWs {
   connect() {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
     const url = this.opts.url ?? process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8081";
-    const full = this.opts.token ? `${url}?token=${encodeURIComponent(this.opts.token)}` : url;
 
     let socket: WebSocket;
     try {
-      socket = new WebSocket(full);
+      socket = new WebSocket(url);
     } catch {
       this.scheduleReconnect();
       return;
@@ -35,6 +34,13 @@ export class PerplexWs {
 
     socket.onopen = () => {
       this.reconnectAttempt = 0;
+      // Edge expects auth as a framed message — `{op:"auth", token}` — not a query
+      // string parameter. TCP ordering guarantees the server sees the auth frame
+      // before any subsequent subscribe, so private channels resolve correctly on
+      // the first try. See #89.
+      if (this.opts.token) {
+        socket.send(JSON.stringify({ op: "auth", token: this.opts.token }));
+      }
       for (const ch of this.subs) socket.send(JSON.stringify({ op: "subscribe", channel: ch }));
       while (this.outboundQueue.length) {
         const m = this.outboundQueue.shift();
