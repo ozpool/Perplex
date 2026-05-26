@@ -396,6 +396,7 @@ pub async fn siwe_verify(
     Json(req): Json<SiweVerifyRequest>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
     let address = verify_siwe(&req.message, &req.signature, &state)?;
+    state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
         jwt,
@@ -426,6 +427,7 @@ pub async fn dev_token(
     State(state): State<AppState>,
     Path(address): Path<String>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
+    state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
         jwt,
