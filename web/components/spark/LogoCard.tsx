@@ -2,9 +2,16 @@
 import { useEffect, useState } from "react";
 
 // Floating ETH-PERP ticker — mirrors PriceTile shape on the left side.
+// Initial series is deterministic (flat line at the anchor price) so SSR
+// markup matches the client's first render. The random walk only starts
+// after mount, so the chart starts moving on the first interval tick.
+const INITIAL_PRICE = 3_842.55;
+const INITIAL_ANCHOR = 3_820;
+const SERIES_LEN = 22;
+
 export function LogoCard() {
-  const [price, setPrice] = useState(3_842.55);
-  const [series, setSeries] = useState<number[]>(() => seed(3_820, 22));
+  const [price, setPrice] = useState(INITIAL_PRICE);
+  const [series, setSeries] = useState<number[]>(() => Array(SERIES_LEN).fill(INITIAL_ANCHOR));
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -66,12 +73,3 @@ export function LogoCard() {
   );
 }
 
-function seed(anchor: number, n: number): number[] {
-  const out: number[] = [];
-  let v = anchor;
-  for (let i = 0; i < n; i++) {
-    v += (Math.random() - 0.5) * 12;
-    out.push(v);
-  }
-  return out;
-}

@@ -30,7 +30,16 @@ export function TradeLayout({ marketId }: Props) {
 
   const { data: marketsData } = useMarkets();
   const market = useMemo(() => marketsData?.markets.find((m) => m.id === marketId), [marketsData, marketId]);
-  const anchor = market ? Number(market.indexPriceX18) : marketId === "btc-usd" ? 100000 : marketId === "eth-usd" ? 3500 : 200;
+  // indexPriceX18 is x18-scaled (e.g. 100_000e18 for BTC). Lightweight-charts
+  // refuses values above ~9e13 so we down-scale before passing to PriceChart.
+  // Falls back to the friendly per-market default until /v1/markets resolves.
+  const anchor = market
+    ? Number(market.indexPriceX18) / 1e18
+    : marketId === "btc-usd"
+      ? 100000
+      : marketId === "eth-usd"
+        ? 3500
+        : 200;
 
   const { data: positions } = usePositions();
   const freeCollateral = positions?.freeCollateralUsdc;
