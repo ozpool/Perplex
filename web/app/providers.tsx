@@ -5,6 +5,7 @@ import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { buildWagmiConfig } from "@/lib/wallet/wagmi-config";
 import { ToastViewport } from "@/components/common/ToastViewport";
+import { CelebrationOverlay } from "@/components/common/CelebrationOverlay";
 import { Logo } from "@/components/layout/Logo";
 
 function makeQueryClient() {
@@ -64,6 +65,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         {mocksReady ? children : <BootSplash />}
         {mocksError && <MocksErrorBanner error={mocksError} />}
         <ToastViewport />
+        <CelebrationOverlay />
       </QueryClientProvider>
     </WagmiProvider>
   );

@@ -36,6 +36,7 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const oracle = useLiveOracle(marketId);
 
   const pushToast = useUi((s) => s.pushToast);
+  const celebrate = useUi((s) => s.celebrate);
   const addOpt = useUi((s) => s.addOptimisticOrder);
   const removeOpt = useUi((s) => s.removeOptimisticOrder);
 
@@ -166,11 +167,10 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
     try {
       await place.mutateAsync(req);
       removeOpt(clientOrderId);
-      pushToast({
-        kind: "success",
-        title: type === "market" ? "Filled" : "Order placed",
-        body: `${side === "buy" ? "Long" : "Short"} ${optimisticQty} ${market.base}`,
-      });
+      const title = type === "market" ? "Position opened" : "Order placed";
+      const body = `${side === "buy" ? "Long" : "Short"} ${optimisticQty} ${market.base}`;
+      celebrate({ title, body });
+      pushToast({ kind: "success", title, body });
       if (type === "market") setQtyInput("");
     } catch (e) {
       removeOpt(clientOrderId);
