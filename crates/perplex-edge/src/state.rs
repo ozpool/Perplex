@@ -67,6 +67,11 @@ struct Inner {
     pub jwt_secret: Vec<u8>,
     /// Funding history keyed by marketId.
     funding_history: RwLock<HashMap<String, Vec<(u64, f64)>>>,
+    /// When true, auth handlers seed a fresh wallet with 100k USDC the first
+    /// time they mint a JWT. Off in production — deposits must flow through
+    /// the on-chain vault path — but on locally so traders can place orders
+    /// without spinning up Anvil + the deposit relayer just to smoke-test.
+    dev_seed_vault: bool,
 }
 
 #[derive(Default, Clone)]
@@ -76,8 +81,21 @@ pub struct BookSnapshot {
     pub asks: Vec<[String; 2]>,
 }
 
+/// 100,000 USDC at 6 decimals — the bankroll handed out by `seed_dev_vault`
+/// when `dev_seed_vault` is on. Big enough to test 20x leverage on BTC at six
+/// figures without hitting `Insufficient margin` mid-demo.
+const DEV_SEED_USDC_RAW: &str = "100000000000";
+
 impl AppState {
     pub fn new(jwt_secret: Vec<u8>) -> Self {
+        Self::with_options(jwt_secret, false)
+    }
+
+    pub fn new_dev(jwt_secret: Vec<u8>) -> Self {
+        Self::with_options(jwt_secret, true)
+    }
+
+    fn with_options(jwt_secret: Vec<u8>, dev_seed_vault: bool) -> Self {
         Self {
             inner: Arc::new(Inner {
                 markets: default_markets(),
@@ -90,8 +108,21 @@ impl AppState {
                 siwe_nonces: RwLock::new(HashMap::new()),
                 jwt_secret,
                 funding_history: RwLock::new(HashMap::new()),
+                dev_seed_vault,
             }),
         }
+    }
+
+    /// Idempotent — seeds the address with `DEV_SEED_USDC_RAW` USDC the first
+    /// time it's seen, only when `dev_seed_vault` was opted in at construction.
+    pub fn seed_dev_vault(&self, address: &str) {
+        if !self.inner.dev_seed_vault {
+            return;
+        }
+        let mut vaults = self.inner.vault_balances.write();
+        vaults
+            .entry(address.to_string())
+            .or_insert_with(|| DEV_SEED_USDC_RAW.to_string());
     }
 
     pub fn jwt_secret(&self) -> &[u8] {

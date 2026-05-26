@@ -337,6 +337,9 @@ pub async fn list_positions(
     State(state): State<AppState>,
     user: AuthedUser,
 ) -> Result<Json<PositionsResponse>, ApiError> {
+    // Lazy seed covers wallets that minted a JWT before dev-seed was wired
+    // (cached localStorage tokens). No-op in prod.
+    state.seed_dev_vault(&user.address);
     let positions = state.positions_for(&user.address);
     let collateral = state.vault_balance(&user.address);
     Ok(Json(PositionsResponse {
@@ -396,6 +399,7 @@ pub async fn siwe_verify(
     Json(req): Json<SiweVerifyRequest>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
     let address = verify_siwe(&req.message, &req.signature, &state)?;
+    state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
         jwt,
@@ -410,6 +414,7 @@ pub async fn get_balance(
     State(state): State<AppState>,
     user: AuthedUser,
 ) -> Result<Json<BalanceResponse>, ApiError> {
+    state.seed_dev_vault(&user.address);
     Ok(Json(BalanceResponse {
         vault_balance_usdc: state.vault_balance(&user.address),
         wallet_usdc_balance: "0".into(),
@@ -426,6 +431,7 @@ pub async fn dev_token(
     State(state): State<AppState>,
     Path(address): Path<String>,
 ) -> Result<Json<SiweVerifyResponse>, ApiError> {
+    state.seed_dev_vault(&address);
     let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
     Ok(Json(SiweVerifyResponse {
         jwt,

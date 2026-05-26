@@ -45,7 +45,11 @@ async fn main() -> anyhow::Result<()> {
         .jwt_secret
         .unwrap_or_else(|| ulid::Ulid::new().to_string())
         .into_bytes();
-    let state = AppState::new(secret);
+    let state = if args.dev_routes {
+        AppState::new_dev(secret)
+    } else {
+        AppState::new(secret)
+    };
     let hub = Hub::new();
     let app = if args.dev_routes {
         tracing::warn!("dev routes enabled: GET /__dev/token/:address is exposed");
