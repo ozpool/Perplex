@@ -1,8 +1,9 @@
 "use client";
 import { useAccount, useConnect, useDisconnect, useChainId } from "wagmi";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
+import { useSiwe } from "@/lib/wallet/siwe";
 
 function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -29,6 +30,26 @@ export function WalletButton() {
   const { disconnect } = useDisconnect();
   const chainId = useChainId();
   const [open, setOpen] = useState(false);
+  const siwe = useSiwe();
+  const { hasJwt, isSigning, signIn } = siwe;
+
+  // Auto-prompt the SIWE signature the moment a wallet finishes connecting
+  // and we don't already hold a valid JWT. Without this, every authed REST
+  // call (place order, list positions, fills) lands 401 "missing bearer"
+  // because the JWT is minted only by the SIWE flow. A per-address ref
+  // guard keeps us from re-popping MetaMask on every render if siwe.signIn
+  // identity changes mid-flow.
+  const promptedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status !== "connected" || !address) {
+      promptedForRef.current = null;
+      return;
+    }
+    if (hasJwt || isSigning) return;
+    if (promptedForRef.current === address) return;
+    promptedForRef.current = address;
+    void signIn();
+  }, [status, address, hasJwt, isSigning, signIn]);
 
   if (status === "connected" && address) {
     return (
@@ -86,8 +107,22 @@ export function WalletButton() {
                   <ExternalIcon />
                   View on Arbiscan
                 </a>
+                {!siwe.hasJwt && (
+                  <button
+                    onClick={() => {
+                      void siwe.signIn();
+                      setOpen(false);
+                    }}
+                    disabled={siwe.isSigning}
+                    className="flex items-center gap-2.5 h-9 px-2 rounded-[var(--radius-sm)] text-sm text-accent hover:bg-accent-soft transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <PowerIcon />
+                    {siwe.isSigning ? "Signing in…" : "Sign in (SIWE)"}
+                  </button>
+                )}
                 <button
                   onClick={() => {
+                    siwe.signOut();
                     disconnect();
                     setOpen(false);
                   }}
