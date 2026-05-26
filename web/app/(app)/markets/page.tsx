@@ -201,7 +201,7 @@ function FeaturedCard({ market }: { market: Market }) {
 
       <div className="relative">
         <div className="font-mono text-[32px] font-semibold tabular-nums text-fg leading-none">
-          {price === null ? "—" : `$${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+          {price === null ? "—" : `$${price.toLocaleString("en-US", { maximumFractionDigits: 2 })}`}
         </div>
         <div className={cn("text-[12px] font-mono mt-2 tabular-nums inline-flex items-center gap-1.5", positive ? "text-long" : "text-short")}>
           <span className={cn("inline-block size-0 border-x-[5px] border-x-transparent", positive ? "border-b-[7px] border-b-long" : "border-t-[7px] border-t-short")} />

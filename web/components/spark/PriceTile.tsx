@@ -3,9 +3,15 @@ import { useEffect, useState } from "react";
 
 // Floating tile showing live-ish BTC price + tiny sparkline.
 // Replaces the "person photo" card from the Spark reference.
+// Initial state is deterministic (flat line) so SSR markup matches the
+// client's first render. The random walk only starts post-mount.
+const INITIAL_PRICE = 100_124.36;
+const INITIAL_ANCHOR = 100_000;
+const SERIES_LEN = 22;
+
 export function PriceTile() {
-  const [price, setPrice] = useState(100_124.36);
-  const [series, setSeries] = useState<number[]>(() => seed(100_000, 22));
+  const [price, setPrice] = useState(INITIAL_PRICE);
+  const [series, setSeries] = useState<number[]>(() => Array(SERIES_LEN).fill(INITIAL_ANCHOR));
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -52,7 +58,7 @@ export function PriceTile() {
         <span className="size-1.5 rounded-full bg-[#1ad094] pulse-dot" />
       </div>
       <div className="font-mono text-[18px] font-semibold tabular-nums text-[var(--s-text)] leading-none">
-        ${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+        ${price.toLocaleString("en-US", { maximumFractionDigits: 2 })}
       </div>
       <div className="flex items-center justify-between mt-1.5">
         <span className={`font-mono text-[11px]`} style={{ color: stroke }}>
@@ -67,12 +73,3 @@ export function PriceTile() {
   );
 }
 
-function seed(anchor: number, n: number): number[] {
-  const out: number[] = [];
-  let v = anchor;
-  for (let i = 0; i < n; i++) {
-    v += (Math.random() - 0.5) * 90;
-    out.push(v);
-  }
-  return out;
-}
