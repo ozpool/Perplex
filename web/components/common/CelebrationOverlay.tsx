@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { useUi } from "@/lib/store/ui-store";
 
-const AUTO_DISMISS_MS = 1600;
+const AUTO_DISMISS_MS = 2500;
 
 export function CelebrationOverlay() {
   const celebration = useUi((s) => s.celebration);
