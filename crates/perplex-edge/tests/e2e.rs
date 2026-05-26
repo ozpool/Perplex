@@ -33,15 +33,18 @@ async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
 }
 
 async fn dev_token(client: &reqwest::Client, base: &str, addr: &str) -> String {
-    let raw = client
+    let resp: serde_json::Value = client
         .get(format!("{base}/__dev/token/{addr}"))
         .send()
         .await
         .unwrap()
-        .text()
+        .json()
         .await
         .unwrap();
-    raw.trim().trim_start_matches("Bearer ").to_string()
+    resp["jwt"]
+        .as_str()
+        .expect("dev_token returns a {jwt, expiresAt} JSON body")
+        .to_string()
 }
 
 #[tokio::test]

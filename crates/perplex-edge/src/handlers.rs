@@ -5,7 +5,7 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::auth::{dev_bearer, issue_jwt, verify_siwe, AuthedUser};
+use crate::auth::{issue_jwt, verify_siwe, AuthedUser};
 use crate::error::ApiError;
 use crate::state::{now_ns, AppState};
 use crate::types::*;
@@ -325,11 +325,17 @@ pub async fn get_balance(
     }))
 }
 
-// -- dev helper: emit a bearer token without going through SIWE. Used only by integration tests
-//    and not exposed by the production router.
+// -- dev helper: mint a JWT for `address` without going through SIWE. Returns the same JSON
+//    shape as `/v1/auth/siwe/verify` so scripts can use a single parser for both. Exposed
+//    only by `build_router_with_dev_token` (integration tests + local dev). Never wired into
+//    the production router.
 pub async fn dev_token(
     State(state): State<AppState>,
     Path(address): Path<String>,
-) -> Result<String, ApiError> {
-    Ok(dev_bearer(&state, &address))
+) -> Result<Json<SiweVerifyResponse>, ApiError> {
+    let (jwt, exp_secs) = issue_jwt(state.jwt_secret(), &address)?;
+    Ok(Json(SiweVerifyResponse {
+        jwt,
+        expires_at: (exp_secs as u128 * 1_000_000_000).to_string(),
+    }))
 }
