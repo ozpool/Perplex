@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState, useEffect } from "react";
 import { useMarkets } from "@/lib/api/queries";
+import { API_BASE } from "@/lib/api/rest";
 import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { useUi } from "@/lib/store/ui-store";
 import { CoinIcon } from "@/components/markets/CoinIcon";
@@ -15,7 +16,7 @@ import { cn } from "@/lib/cn";
 type SortKey = "volume" | "change" | "name";
 
 export default function MarketsPage() {
-  const { data, isLoading, isError, refetch } = useMarkets();
+  const { data, isLoading, isError, error, refetch } = useMarkets();
   const [query, setQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("volume");
 
@@ -123,7 +124,11 @@ export default function MarketsPage() {
 
         {isError && (
           <div className="p-6">
-            <ErrorState description="Failed to load markets." onRetry={() => refetch()} />
+            <ErrorState
+              title="Failed to load markets"
+              description={`${error instanceof Error ? error.message : String(error ?? "unknown error")} — GET ${API_BASE}/v1/markets. Is perplex-edge running and reachable from the browser?`}
+              onRetry={() => refetch()}
+            />
           </div>
         )}
         {isLoading && (
@@ -139,7 +144,7 @@ export default function MarketsPage() {
         ))}
 
         {!isLoading && markets.length === 0 && (
-          <div className="p-10 text-center text-sm text-fg-mid">No markets match &ldquo;{query}&rdquo;.</div>
+          <div className="p-10 text-center text-sm text-fg-mid">No markets match "{query}".</div>
         )}
       </Card>
     </div>
@@ -246,7 +251,8 @@ function StatBlock({ label, badge, value, tone }: { label: string; badge: string
 
 /* ── Category tabs ──────────────────────────────────────────────────────── */
 function CategoryTabs() {
-  const CATS: { label: string; active?: boolean; badge?: string; soon?: boolean }[] = [
+  type Cat = { label: string; active?: boolean; badge?: string; soon?: boolean };
+  const CATS: Cat[] = [
     { label: "All", active: true, badge: "3" },
     { label: "Crypto", badge: "3" },
     { label: "Layer 1", badge: "2" },
