@@ -11,6 +11,36 @@ use rust_decimal::Decimal;
 
 use crate::types::{FillInfo, MarketInfo, OpenOrder, PositionInfo, PublicTrade};
 
+/// Result of crossing a taker order against the existing resting book.
+#[derive(Debug, Clone)]
+pub struct MatchedFill {
+    pub maker_address: String,
+    pub maker_order_id: String,
+    pub price: Decimal,
+    pub qty: Decimal,
+    pub ts_ns: u64,
+}
+
+fn scale_x18(d: Decimal) -> String {
+    let scale = Decimal::from_str_exact("1000000000000000000").expect("1e18 literal parses");
+    (d * scale).trunc().normalize().to_string()
+}
+
+fn scale_usdc6(d: Decimal) -> String {
+    let scale = Decimal::from_str_exact("1000000").expect("1e6 literal parses");
+    (d * scale).trunc().normalize().to_string()
+}
+
+fn unscale_x18(s: &str) -> Decimal {
+    let raw = s.parse::<Decimal>().unwrap_or_default();
+    let scale = Decimal::from_str_exact("1000000000000000000").expect("1e18 literal parses");
+    if scale.is_zero() {
+        Decimal::ZERO
+    } else {
+        raw / scale
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<Inner>,
@@ -198,6 +228,191 @@ impl AppState {
         entry.sequence = entry.sequence.saturating_add(1);
         entry.bids = to_levels(bids, true);
         entry.asks = to_levels(asks, false);
+    }
+
+    /// Cross a taker order against the existing resting book and return the
+    /// matched fills. Decrements / removes maker open orders in place. Caller
+    /// is responsible for recording fills, public trades, and position updates.
+    /// Always rebuilds the orderbook snapshot so subscribers see the new top
+    /// of book on the next poll/frame.
+    pub fn match_taker(
+        &self,
+        market_id: &str,
+        taker_side: &str,
+        taker_price: Option<Decimal>,
+        taker_qty: Decimal,
+    ) -> Vec<MatchedFill> {
+        let opp_side = if taker_side == "buy" { "sell" } else { "buy" };
+
+        // Phase 1 — read-only candidate collection.
+        let mut candidates: Vec<(String, String, Decimal, Decimal, u64)> = {
+            let orders = self.inner.open_orders.read();
+            let mut out = vec![];
+            for (addr, list) in orders.iter() {
+                for o in list.iter() {
+                    if o.market_id != market_id || o.side != opp_side || o.order_type != "limit" {
+                        continue;
+                    }
+                    let price = match o.price.parse::<Decimal>() {
+                        Ok(p) if !p.is_zero() => p,
+                        _ => continue,
+                    };
+                    let rem = match o.remaining.parse::<Decimal>() {
+                        Ok(r) if !r.is_zero() => r,
+                        _ => continue,
+                    };
+                    if let Some(tp) = taker_price {
+                        if taker_side == "buy" && price > tp {
+                            continue;
+                        }
+                        if taker_side == "sell" && price < tp {
+                            continue;
+                        }
+                    }
+                    let ts: u64 = o.ts_ns.parse().unwrap_or(0);
+                    out.push((addr.clone(), o.id.clone(), price, rem, ts));
+                }
+            }
+            // Price-time priority: best price first, oldest first within a price.
+            if taker_side == "buy" {
+                out.sort_by(|a, b| a.2.cmp(&b.2).then(a.4.cmp(&b.4)));
+            } else {
+                out.sort_by(|a, b| b.2.cmp(&a.2).then(a.4.cmp(&b.4)));
+            }
+            out
+        };
+
+        // Phase 2 — decrement matched maker orders under a write lock.
+        let mut filled = vec![];
+        let mut remaining = taker_qty;
+        {
+            let mut orders = self.inner.open_orders.write();
+            for (maker_addr, maker_id, price, _, _) in candidates.drain(..) {
+                if remaining.is_zero() {
+                    break;
+                }
+                let Some(list) = orders.get_mut(&maker_addr) else {
+                    continue;
+                };
+                let Some(order) = list.iter_mut().find(|o| o.id == maker_id) else {
+                    continue;
+                };
+                let maker_rem: Decimal = match order.remaining.parse() {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                if maker_rem.is_zero() {
+                    continue;
+                }
+                let fill_qty = remaining.min(maker_rem);
+                let new_rem = maker_rem - fill_qty;
+                order.remaining = new_rem.normalize().to_string();
+                filled.push(MatchedFill {
+                    maker_address: maker_addr,
+                    maker_order_id: maker_id,
+                    price,
+                    qty: fill_qty,
+                    ts_ns: now_ns(),
+                });
+                remaining -= fill_qty;
+            }
+            // Reap fully filled maker orders in this market.
+            for list in orders.values_mut() {
+                list.retain(|o| {
+                    o.market_id != market_id
+                        || o.remaining
+                            .parse::<Decimal>()
+                            .map(|r| !r.is_zero())
+                            .unwrap_or(true)
+                });
+            }
+        }
+
+        // Phase 3 — refresh the public orderbook snapshot.
+        self.rebuild_orderbook(market_id);
+
+        filled
+    }
+
+    /// Apply a fill to a trader's position book. Same-side fills increase size
+    /// at the volume-weighted entry price. Opposite-side fills reduce the
+    /// existing position (and remove it when fully closed) or flip it when
+    /// the new qty exceeds the resting size. Mark price tracks entry until an
+    /// oracle relayer is wired - good enough to render the position panel.
+    pub fn upsert_position(
+        &self,
+        address: &str,
+        market_id: &str,
+        order_side: &str,
+        qty: Decimal,
+        price: Decimal,
+    ) {
+        let new_side = if order_side == "buy" { "long" } else { "short" };
+        let mut positions = self.inner.positions.write();
+        let list = positions.entry(address.to_string()).or_default();
+        let idx = list.iter().position(|p| p.market_id == market_id);
+        let Some(i) = idx else {
+            list.push(PositionInfo {
+                market_id: market_id.to_string(),
+                size: qty.normalize().to_string(),
+                side: new_side.to_string(),
+                entry_price_x18: scale_x18(price),
+                mark_price_x18: scale_x18(price),
+                notional_usdc: scale_usdc6(qty * price),
+                unrealised_pnl_usdc: "0".into(),
+                realised_pnl_usdc: "0".into(),
+                leverage: "1".into(),
+                liquidation_price_x18: "0".into(),
+                funding_paid_usdc: "0".into(),
+                last_updated_ts_ns: now_ns().to_string(),
+            });
+            return;
+        };
+
+        let old_size: Decimal = list[i].size.parse().unwrap_or_default();
+        let old_entry = unscale_x18(&list[i].entry_price_x18);
+
+        let ts = now_ns().to_string();
+        if list[i].side == new_side {
+            // Same-side add: volume-weighted entry.
+            let new_size = old_size + qty;
+            let new_entry = if !new_size.is_zero() {
+                (old_size * old_entry + qty * price) / new_size
+            } else {
+                price
+            };
+            let p = &mut list[i];
+            p.size = new_size.normalize().to_string();
+            p.entry_price_x18 = scale_x18(new_entry);
+            p.mark_price_x18 = scale_x18(new_entry);
+            p.notional_usdc = scale_usdc6(new_size * new_entry);
+            p.last_updated_ts_ns = ts;
+            return;
+        }
+
+        // Opposite side -> reduce or flip.
+        if qty < old_size {
+            let new_size = old_size - qty;
+            let p = &mut list[i];
+            p.size = new_size.normalize().to_string();
+            p.notional_usdc = scale_usdc6(new_size * old_entry);
+            p.last_updated_ts_ns = ts;
+            return;
+        }
+        if qty == old_size {
+            // Fully closed.
+            list.remove(i);
+            return;
+        }
+        // Flip: the overflow becomes the new position on the opposite side.
+        let overflow = qty - old_size;
+        let p = &mut list[i];
+        p.side = new_side.to_string();
+        p.size = overflow.normalize().to_string();
+        p.entry_price_x18 = scale_x18(price);
+        p.mark_price_x18 = scale_x18(price);
+        p.notional_usdc = scale_usdc6(overflow * price);
+        p.last_updated_ts_ns = ts;
     }
 
     pub fn positions_for(&self, address: &str) -> Vec<PositionInfo> {
@@ -443,6 +658,96 @@ mod tests {
         assert!(state.cancel_order("0xa", "o2"));
         let snap = state.orderbook("btc-usd").unwrap();
         assert_eq!(snap.bids, vec![["99950".to_string(), "0.1".to_string()]]);
+    }
+
+    #[test]
+    fn match_taker_crosses_resting_ask() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xmaker", order("o1", "sell", "100050", "0.05"));
+        let matches = state.match_taker(
+            "btc-usd",
+            "buy",
+            Some(Decimal::from_str_exact("100050").unwrap()),
+            Decimal::from_str_exact("0.01").unwrap(),
+        );
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].maker_address, "0xmaker");
+        assert_eq!(matches[0].price.normalize().to_string(), "100050");
+        assert_eq!(matches[0].qty.normalize().to_string(), "0.01");
+        // Maker still has 0.04 resting -> snapshot reflects it
+        let snap = state.orderbook("btc-usd").unwrap();
+        assert_eq!(snap.asks, vec![["100050".to_string(), "0.04".to_string()]]);
+    }
+
+    #[test]
+    fn market_taker_walks_best_price_first() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xa", order("o1", "sell", "100200", "0.05"));
+        state.add_open_order("0xb", order("o2", "sell", "100050", "0.03"));
+        let matches = state.match_taker(
+            "btc-usd",
+            "buy",
+            None, // market
+            Decimal::from_str_exact("0.05").unwrap(),
+        );
+        assert_eq!(matches.len(), 2);
+        // Best ask first
+        assert_eq!(matches[0].price.normalize().to_string(), "100050");
+        assert_eq!(matches[0].qty.normalize().to_string(), "0.03");
+        assert_eq!(matches[1].price.normalize().to_string(), "100200");
+        assert_eq!(matches[1].qty.normalize().to_string(), "0.02");
+    }
+
+    #[test]
+    fn limit_taker_does_not_cross_below_price() {
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xmaker", order("o1", "sell", "100050", "0.05"));
+        let matches = state.match_taker(
+            "btc-usd",
+            "buy",
+            Some(Decimal::from_str_exact("100000").unwrap()),
+            Decimal::from_str_exact("0.01").unwrap(),
+        );
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn upsert_position_opens_then_averages_then_closes() {
+        let state = AppState::new(b"test".to_vec());
+        // Open long 0.1 @ 100000
+        state.upsert_position(
+            "0xtaker",
+            "btc-usd",
+            "buy",
+            Decimal::from_str_exact("0.1").unwrap(),
+            Decimal::from_str_exact("100000").unwrap(),
+        );
+        let p1 = &state.positions_for("0xtaker")[0];
+        assert_eq!(p1.side, "long");
+        assert_eq!(p1.size, "0.1");
+        // Add 0.1 @ 102000 -> avg 101000
+        state.upsert_position(
+            "0xtaker",
+            "btc-usd",
+            "buy",
+            Decimal::from_str_exact("0.1").unwrap(),
+            Decimal::from_str_exact("102000").unwrap(),
+        );
+        let p2 = &state.positions_for("0xtaker")[0];
+        assert_eq!(p2.size, "0.2");
+        assert_eq!(
+            unscale_x18(&p2.entry_price_x18).normalize().to_string(),
+            "101000"
+        );
+        // Close fully with sell 0.2
+        state.upsert_position(
+            "0xtaker",
+            "btc-usd",
+            "sell",
+            Decimal::from_str_exact("0.2").unwrap(),
+            Decimal::from_str_exact("101000").unwrap(),
+        );
+        assert!(state.positions_for("0xtaker").is_empty());
     }
 
     #[test]
