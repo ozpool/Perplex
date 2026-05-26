@@ -67,16 +67,32 @@ fi
 [[ "$(uname)" == "Darwin" ]] || fail "this script drives Terminal.app and only runs on macOS. On Linux, run each section by hand from the Notion runbook."
 
 # ----- terminal opener -----------------------------------------------------
+# AppleScript's string literals don't grok bash quoting; instead of trying to
+# escape `do script "..."` we materialise each spawn as a temp bash script and
+# tell Terminal.app to execute it. Tempfiles are auto-cleaned on exit.
+# Temp scripts must outlive this launcher (Terminal.app reads them lazily),
+# so we deliberately do NOT trap-cleanup on EXIT. They land under
+# /tmp/perplex-launch.* and macOS rotates /tmp itself.
+TMPDIR_LAUNCH="$(mktemp -d -t perplex-launch.XXXXXX)"
+
 open_term() {
-  # $1 = window title, $2 = command string
+  # $1 = window title, $2 = command string (runs in $REPO with a fresh bash)
   local title="$1"
   local cmd="$2"
-  /usr/bin/osascript <<APPLESCRIPT
-tell application "Terminal"
-  activate
-  do script "echo -ne '\\033]0;${title}\\007'; cd \"${REPO}\" && ${cmd}"
-end tell
-APPLESCRIPT
+  # macOS mktemp requires the XXXXXX template at the very end of the basename;
+  # placing it before `.sh` errors with "File exists". Build the name by hand.
+  local slug stamp script_path
+  slug="$(printf '%s' "$title" | tr -c 'A-Za-z0-9' '_')"
+  stamp="$(date +%s)-$$-$RANDOM"
+  script_path="${TMPDIR_LAUNCH}/launch-${slug}-${stamp}.sh"
+  cat > "$script_path" <<EOF
+#!/usr/bin/env bash
+printf '\033]0;%s\007' "${title}"
+cd "${REPO}" || exit 1
+${cmd}
+EOF
+  chmod +x "$script_path"
+  /usr/bin/osascript -e "tell application \"Terminal\" to do script \"${script_path}\""
 }
 
 # ----- step 1: dev-up (blocking) -------------------------------------------
