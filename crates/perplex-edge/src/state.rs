@@ -266,6 +266,37 @@ impl AppState {
     /// is responsible for recording fills, public trades, and position updates.
     /// Always rebuilds the orderbook snapshot so subscribers see the new top
     /// of book on the next poll/frame.
+    /// (bid_count, ask_count) of resting limit orders for `market_id`. Used
+    /// only as a diagnostic log line in place_order so we can tell at a glance
+    /// whether the bot's orders are actually in state when a taker is rejected
+    /// for "no liquidity".
+    pub fn resting_orders_summary(&self, market_id: &str) -> (usize, usize) {
+        let orders = self.inner.open_orders.read();
+        let mut bids = 0;
+        let mut asks = 0;
+        for list in orders.values() {
+            for o in list.iter() {
+                if o.market_id != market_id || o.order_type != "limit" {
+                    continue;
+                }
+                let has_remaining = o
+                    .remaining
+                    .parse::<Decimal>()
+                    .map(|r| !r.is_zero())
+                    .unwrap_or(false);
+                if !has_remaining {
+                    continue;
+                }
+                match o.side.as_str() {
+                    "buy" => bids += 1,
+                    "sell" => asks += 1,
+                    _ => {}
+                }
+            }
+        }
+        (bids, asks)
+    }
+
     pub fn match_taker(
         &self,
         market_id: &str,

@@ -205,6 +205,7 @@ pub async fn place_order(
 
     // Cross against the resting book. Maker orders are decremented in place and
     // the public orderbook snapshot is rebuilt by `match_taker`.
+    let resting_summary = state.resting_orders_summary(&req.market_id);
     let matches = state.match_taker(&req.market_id, &req.side, taker_price, taker_qty);
     let filled_qty: Decimal = matches.iter().map(|m| m.qty).sum();
     let taker_remaining = taker_qty - filled_qty;
@@ -216,6 +217,8 @@ pub async fn place_order(
         qty = %taker_qty,
         filled = %filled_qty,
         match_count = matches.len(),
+        resting_bids = resting_summary.0,
+        resting_asks = resting_summary.1,
         "place_order match outcome"
     );
     let taker_side = req.side.clone();
