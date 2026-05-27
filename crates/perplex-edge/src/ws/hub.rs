@@ -18,6 +18,7 @@ pub enum Topic {
     Orderbook(String),
     Trades(String),
     Oracle(String),
+    Funding(String),
     UserFills(String),     // address
     UserPositions(String), // address
 }
@@ -30,6 +31,8 @@ impl Topic {
             Some(Topic::Trades(rest.to_string()))
         } else if let Some(rest) = s.strip_prefix("oracle.") {
             Some(Topic::Oracle(rest.to_string()))
+        } else if let Some(rest) = s.strip_prefix("funding.") {
+            Some(Topic::Funding(rest.to_string()))
         } else if s == "user.fills" {
             Some(Topic::UserFills(String::new()))
         } else if s == "user.positions" {

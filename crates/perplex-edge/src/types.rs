@@ -30,6 +30,23 @@ pub struct MarketInfo {
     pub funding_interval_sec: u32,
     #[serde(rename = "indexPriceX18")]
     pub index_price_x18: String,
+    /// Rolling 24-hour quote volume in USDC dollars (decimal string). Computed
+    /// at read time from the public-trades ring; "0" when no trades yet.
+    #[serde(rename = "volume24hUsdc", default)]
+    pub volume_24h_usdc: String,
+    /// Cross-account sum of |size * mark| across every open position in this
+    /// market, USDC dollars (decimal string). "0" when no positions exist.
+    #[serde(rename = "openInterestUsdc", default)]
+    pub open_interest_usdc: String,
+    /// Live funding rate in basis points (1 bp = 0.01%). Derived from the
+    /// orderbook mid vs the oracle index price each tick. Signed.
+    #[serde(rename = "fundingRateBps", default)]
+    pub funding_rate_bps: i32,
+    /// Nanosecond timestamp of the next funding settlement boundary. Aligned
+    /// to `funding_interval_sec` from the Unix epoch — same value every tick
+    /// until the boundary passes, so the FE countdown is stable.
+    #[serde(rename = "nextFundingTsNs", default)]
+    pub next_funding_ts_ns: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

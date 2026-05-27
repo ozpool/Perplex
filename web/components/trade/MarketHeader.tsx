@@ -4,7 +4,7 @@ import type { Market, MarketId } from "@/lib/types/contract";
 import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { MarketSwitcher } from "@/components/layout/MarketSwitcher";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
-import { formatCountdown, x18ToDollars } from "@/lib/format/number";
+import { formatCountdown, usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -35,34 +35,34 @@ export function MarketHeader({ marketId, market }: Props) {
     setOpenPrice(cur * (0.98 + (seed / 40) * 0.04));
   }
 
-  // Countdown ticker + fallback next-hour. We bump a `_` state once per
-  // second so formatCountdown below re-renders, and recompute the next-hour
-  // anchor inside the interval (calling Date.now() in render would violate
-  // react-hooks/purity).
-  const [synthNextFundingTsNs, setSynthNextFundingTsNs] = useState<string>(
-    () => `${BigInt(Math.ceil(Date.now() / 3_600_000) * 3_600_000) * 1_000_000n}`
-  );
+  // Countdown ticker. Bump a hidden state once per second so formatCountdown
+  // below re-renders against the (server-provided) next-funding boundary.
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => {
-      setTick((t) => t + 1);
-      const ms = Math.ceil(Date.now() / 3_600_000) * 3_600_000;
-      const next = `${BigInt(ms) * 1_000_000n}`;
-      setSynthNextFundingTsNs((prev) => (prev === next ? prev : next));
-    }, 1000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
   const change = openPrice && Number.isFinite(cur) ? ((cur - openPrice) / openPrice) * 100 : 0;
   const changeAbs = openPrice && Number.isFinite(cur) ? cur - openPrice : 0;
 
-  // Synth a stable funding rate per market when the funding leader is silent
-  // so the stat doesn't read 0.0000% — clearly bounded (-2bps..+2bps).
-  const synthFundingBps = ((hashMarket(marketId) % 41) - 20) / 10;
-  const fundingBps = funding?.currentRateBps ?? synthFundingBps;
+  // Funding rate comes from the WS funding.{marketId} channel when the edge
+  // ticker is alive; otherwise fall back to the value the REST /v1/markets
+  // payload includes (computed at read time from book mid vs index). Both
+  // paths are real — no more per-market hash synth.
+  const fundingBps = funding?.currentRateBps ?? market?.fundingRateBps ?? 0;
   const fundingClass = fundingBps >= 0 ? "text-long" : "text-short";
 
-  const nextFundingTsNs = funding?.nextSettlementTsNs ?? synthNextFundingTsNs;
+  // Next-funding timestamp is now authoritative on the server side (aligned
+  // to fundingIntervalSec), so prefer WS, then REST. Both render the same
+  // value until the boundary passes.
+  const nextFundingTsNs =
+    funding?.nextSettlementTsNs ?? market?.nextFundingTsNs ?? "0";
+
+  // 24h volume and open interest are computed on the edge and shipped with
+  // every /v1/markets call. usdc6ToDollars handles the 6-decimal scaling.
+  const volume24h = market?.volume24hUsdc ? usdc6ToDollars(market.volume24hUsdc) : 0;
+  const openInterest = market?.openInterestUsdc ? usdc6ToDollars(market.openInterestUsdc) : 0;
 
   return (
     <div className="border-b border-border bg-bg-1 flex items-stretch">
@@ -92,11 +92,11 @@ export function MarketHeader({ marketId, market }: Props) {
         </Stat>
 
         <Stat label="24h volume">
-          <NumberDisplay value={fakeVolume(marketId, cur)} decimals={2} size="sm" prefix="$" />
+          <NumberDisplay value={volume24h} decimals={2} size="sm" prefix="$" />
         </Stat>
 
         <Stat label="Open interest">
-          <NumberDisplay value={fakeOI(marketId, cur)} decimals={2} size="sm" prefix="$" />
+          <NumberDisplay value={openInterest} decimals={2} size="sm" prefix="$" />
         </Stat>
 
         <Stat label="Funding (1h)">
@@ -167,18 +167,3 @@ function priceDecimals(market: Market | undefined): number {
   return Math.max(2, market.tickSize.length - i - 1);
 }
 
-function hashMarket(m: MarketId): number {
-  let h = 0;
-  for (const c of m) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return h;
-}
-
-function fakeVolume(m: MarketId, price: number): number {
-  const base = m === "btc-usd" ? 2_400 : m === "eth-usd" ? 18_000 : 200_000;
-  return Number.isFinite(price) ? price * base * (0.9 + Math.sin(Date.now() / 30000) * 0.05) : 0;
-}
-
-function fakeOI(m: MarketId, price: number): number {
-  const base = m === "btc-usd" ? 900 : m === "eth-usd" ? 6_000 : 80_000;
-  return Number.isFinite(price) ? price * base : 0;
-}

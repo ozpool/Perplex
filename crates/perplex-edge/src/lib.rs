@@ -9,6 +9,7 @@
 pub mod auth;
 pub mod error;
 pub mod handlers;
+pub mod market_stats;
 pub mod openapi;
 pub mod oracle;
 pub mod ratelimit;

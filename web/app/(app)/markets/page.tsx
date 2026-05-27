@@ -7,7 +7,7 @@ import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { useUi } from "@/lib/store/ui-store";
 import { CoinIcon } from "@/components/markets/CoinIcon";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
-import { x18ToDollars } from "@/lib/format/number";
+import { usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/common/ErrorState";
@@ -30,12 +30,29 @@ export default function MarketsPage() {
     if (sortBy === "name") {
       sorted.sort((a, b) => a.base.localeCompare(b.base));
     } else if (sortBy === "volume") {
-      sorted.sort((a, b) => pseudoVolume(b) - pseudoVolume(a));
+      // Real 24h quote volume from edge.
+      sorted.sort(
+        (a, b) =>
+          Number(b.volume24hUsdc ?? "0") - Number(a.volume24hUsdc ?? "0")
+      );
     } else if (sortBy === "change") {
+      // 24h change has no server-side number yet (needs a TWAP/candle store);
+      // pseudoChange keeps the sort stable per market without inventing data.
       sorted.sort((a, b) => pseudoChange(b) - pseudoChange(a));
     }
     return sorted;
   }, [data, query, sortBy]);
+
+  // Aggregate header stats roll up real per-market numbers; falls back to 0
+  // until at least one /v1/markets response has landed.
+  const totalVolume = (data?.markets ?? []).reduce(
+    (sum, m) => sum + (m.volume24hUsdc ? usdc6ToDollars(m.volume24hUsdc) : 0),
+    0
+  );
+  const totalOpenInterest = (data?.markets ?? []).reduce(
+    (sum, m) => sum + (m.openInterestUsdc ? usdc6ToDollars(m.openInterestUsdc) : 0),
+    0
+  );
 
   return (
     <div className="relative px-3 sm:px-6 lg:px-10 py-6 sm:py-10 max-w-screen-xl w-full mx-auto flex flex-col gap-8">
@@ -66,8 +83,8 @@ export default function MarketsPage() {
 
       {/* Stat row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <StatBlock label="Trading volume" badge="24h" value="$48.2M" tone="accent" />
-        <StatBlock label="Open interest" badge="current" value="$12.7M" tone="long" />
+        <StatBlock label="Trading volume" badge="24h" value={fmtCompactUsd(totalVolume)} tone="accent" />
+        <StatBlock label="Open interest" badge="current" value={fmtCompactUsd(totalOpenInterest)} tone="long" />
         <StatBlock label="Fees generated" badge="24h" value="$3,279.51" tone="muted" />
       </div>
 
@@ -305,9 +322,12 @@ function MarketRow({ market }: { market: Market }) {
 
   // Same descale as FeaturedCard — priceX18 is 1e18-scaled raw integer.
   const price = oracle ? x18ToDollars(oracle.priceX18) : null;
-  const fundingPct = funding ? funding.currentRateBps / 100 : null;
+  // Funding from WS when alive, else from REST market.fundingRateBps (also real).
+  const fundingBps = funding?.currentRateBps ?? market.fundingRateBps ?? null;
+  const fundingPct = fundingBps !== null ? fundingBps / 100 : null;
   const change = pseudoChange(market);
-  const volume = pseudoVolume(market) * 1_000_000;
+  // Real edge-computed 24h quote volume; "0" until first trade lands.
+  const volume = market.volume24hUsdc ? usdc6ToDollars(market.volume24hUsdc) : 0;
 
   return (
     <Link
@@ -408,9 +428,13 @@ function pseudoChange(market: Market): number {
   // -8% to +8%, deterministic
   return ((hashBase(market) % 1601) - 800) / 100;
 }
-function pseudoVolume(market: Market): number {
-  // millions of USDC, deterministic, varies per market
-  return 8 + (hashBase(market) % 90);
+function fmtCompactUsd(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return "$0";
+  const f = new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  });
+  return `$${f.format(n)}`;
 }
 
 function SearchIcon() {

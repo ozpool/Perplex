@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 
 use clap::Parser;
+use std::time::Duration;
+
+use perplex_edge::market_stats::spawn_market_stats_ticker;
 use perplex_edge::oracle::{default_feeds, spawn_pyth_relayer};
 use perplex_edge::ws::{serve_ws, Hub, WsConfig};
 use perplex_edge::{build_router, build_router_with_dev_token, AppState};
@@ -71,6 +74,10 @@ async fn main() -> anyhow::Result<()> {
     } else {
         tracing::info!("oracle relayer disabled by flag; markets use static seed prices");
     }
+    // Funding/next-funding broadcaster. Cheap to run regardless of relayer
+    // status — volume + OI fall out of REST reads, this just makes the FE
+    // funding pill move without a poll.
+    spawn_market_stats_ticker(state.clone(), hub.clone(), Duration::from_secs(2));
 
     let ws_addr: SocketAddr = args.ws_bind.parse()?;
     let _ws_handle = serve_ws(state, hub, WsConfig { bind: ws_addr }).await?;
