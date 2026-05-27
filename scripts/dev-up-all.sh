@@ -161,6 +161,27 @@ open_term "perplex seed-book" \
 "python3 scripts/seed-book.py"
 ok "seed-book launching"
 
+# Verify the book actually got populated. If seed-book died on boot (bad
+# Python, wrong port, edge unreachable) you only find out when the trade
+# page is empty in front of the audience — fail loud here instead.
+printf "waiting for seed-book to populate btc-usd "
+book_up=0
+for _ in $(seq 1 30); do
+  ask_count="$(curl -sf -m 1 http://127.0.0.1:8080/v1/orderbook/btc-usd 2>/dev/null \
+    | jq -r '.asks // [] | length' 2>/dev/null || echo 0)"
+  if [[ "$ask_count" -ge 1 ]]; then
+    book_up=1
+    echo ""
+    ok "btc-usd book has $ask_count ask level(s) — seed-book is alive"
+    break
+  fi
+  printf "."
+  sleep 1
+done
+if [[ "$book_up" -ne 1 ]]; then
+  warn "btc-usd book is still empty after 30s. Check the 'perplex seed-book' Terminal window for a traceback BEFORE going live."
+fi
+
 # ----- step 5: metrics stack in a new window -------------------------------
 step "step 5/6  prometheus + grafana"
 open_term "perplex metrics" \
