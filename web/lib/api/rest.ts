@@ -23,6 +23,19 @@ function authHeaders(): HeadersInit {
   return jwt ? { Authorization: `Bearer ${jwt}` } : {};
 }
 
+// The edge owns JWT expiry. The FE's locally-stored `expiresAt` can drift out
+// of sync with the JWT's `exp` claim (e.g. when the edge's JWT_SECRET rotates
+// in dev), so we treat a 401 from the edge as the authoritative signal that
+// the token is dead. Wiping it here + emitting the change event makes the
+// wallet UI prompt for a fresh SIWE on the next interaction — without this
+// the FE just keeps re-sending the dead Bearer forever.
+function clearStoredJwtOn401() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("perplex.jwt");
+  window.localStorage.removeItem("perplex.jwt.expiresAt");
+  window.dispatchEvent(new Event("perplex.jwt.change"));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -38,6 +51,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       detail = await res.json();
     } catch {
       detail = await res.text();
+    }
+    if (res.status === 401) {
+      clearStoredJwtOn401();
     }
     const err = new Error(`API ${res.status}: ${res.statusText}`) as Error & { status: number; detail?: unknown };
     err.status = res.status;
