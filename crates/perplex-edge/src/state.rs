@@ -306,6 +306,7 @@ impl AppState {
         taker_side: &str,
         taker_price: Option<Decimal>,
         taker_qty: Decimal,
+        taker_address: &str,
     ) -> Decimal {
         let opp_side = if taker_side == "buy" { "sell" } else { "buy" };
         let orders = self.inner.open_orders.read();
@@ -313,7 +314,14 @@ impl AppState {
         let mut filled = Decimal::ZERO;
         // Walk every candidate maker; price-time ordering doesn't change
         // *total* match qty so we skip the sort.
-        for list in orders.values() {
+        for (addr, list) in orders.iter() {
+            // Self-trade prevention: a wallet must never cross its own
+            // resting orders. Without this, taker + maker upserts on the
+            // same address net to zero and the user's position vanishes
+            // the instant they trade through one of their own limits.
+            if addr == taker_address {
+                continue;
+            }
             for o in list.iter() {
                 if remaining.is_zero() {
                     return filled;
@@ -351,6 +359,7 @@ impl AppState {
         taker_side: &str,
         taker_price: Option<Decimal>,
         taker_qty: Decimal,
+        taker_address: &str,
     ) -> Vec<MatchedFill> {
         let opp_side = if taker_side == "buy" { "sell" } else { "buy" };
 
@@ -359,6 +368,12 @@ impl AppState {
             let orders = self.inner.open_orders.read();
             let mut out = vec![];
             for (addr, list) in orders.iter() {
+                // Self-trade prevention: skip every maker order owned by
+                // the same wallet as the taker. See match_taker_probe for
+                // the failure mode this guards against.
+                if addr == taker_address {
+                    continue;
+                }
                 for o in list.iter() {
                     if o.market_id != market_id || o.side != opp_side || o.order_type != "limit" {
                         continue;
@@ -787,6 +802,7 @@ mod tests {
             "buy",
             Some(Decimal::from_str_exact("100050").unwrap()),
             Decimal::from_str_exact("0.01").unwrap(),
+            "0xtaker",
         );
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].maker_address, "0xmaker");
@@ -807,6 +823,7 @@ mod tests {
             "buy",
             None, // market
             Decimal::from_str_exact("0.05").unwrap(),
+            "0xtaker",
         );
         assert_eq!(matches.len(), 2);
         // Best ask first
@@ -825,8 +842,31 @@ mod tests {
             "buy",
             Some(Decimal::from_str_exact("100000").unwrap()),
             Decimal::from_str_exact("0.01").unwrap(),
+            "0xtaker",
         );
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn match_taker_skips_self_owned_maker_orders() {
+        // A wallet must never cross its own resting limits. If it did, the
+        // upsert_position calls for taker (+long) and maker (-short) would
+        // run against the same address and net to zero, deleting the
+        // position. This is exactly what bit us during the demo run on
+        // 2026-05-27 (PR #145).
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xself", order("self-ask", "sell", "100050", "0.05"));
+        state.add_open_order("0xother", order("other-ask", "sell", "100100", "0.05"));
+        let matches = state.match_taker(
+            "btc-usd",
+            "buy",
+            Some(Decimal::from_str_exact("100200").unwrap()),
+            Decimal::from_str_exact("0.05").unwrap(),
+            "0xself",
+        );
+        // Self-owned ask is skipped; only the other-owned one matches.
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].maker_address, "0xother");
     }
 
     #[test]

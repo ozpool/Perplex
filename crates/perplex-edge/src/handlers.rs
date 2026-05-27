@@ -210,7 +210,13 @@ pub async fn place_order(
     // resting remainder). This is what every CEX does and what the bot's
     // strategy relies on to avoid accidentally taking its own counter-quotes.
     if req.post_only {
-        let probe = state.match_taker_probe(&req.market_id, &req.side, taker_price, taker_qty);
+        let probe = state.match_taker_probe(
+            &req.market_id,
+            &req.side,
+            taker_price,
+            taker_qty,
+            &user.address,
+        );
         if probe > Decimal::ZERO {
             return Err(ApiError::BadRequest(
                 "post_only order would cross resting liquidity".into(),
@@ -218,7 +224,13 @@ pub async fn place_order(
         }
     }
     let resting_summary = state.resting_orders_summary(&req.market_id);
-    let matches = state.match_taker(&req.market_id, &req.side, taker_price, taker_qty);
+    let matches = state.match_taker(
+        &req.market_id,
+        &req.side,
+        taker_price,
+        taker_qty,
+        &user.address,
+    );
     let filled_qty: Decimal = matches.iter().map(|m| m.qty).sum();
     let taker_remaining = taker_qty - filled_qty;
     tracing::info!(
