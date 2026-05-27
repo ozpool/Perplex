@@ -9,7 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 
-use crate::types::{FillInfo, MarketInfo, OpenOrder, PositionInfo, PublicTrade};
+use crate::types::{
+    FillInfo, MarketInfo, OpenOrder, PositionInfo, PositionsResponse, PublicTrade,
+};
 
 /// Result of crossing a taker order against the existing resting book.
 #[derive(Debug, Clone)]
@@ -584,6 +586,78 @@ impl AppState {
             .entry(address.to_string())
             .or_default()
             .push(fill);
+    }
+
+    /// Build a fully-populated PositionsResponse, including per-position
+    /// mark + PnL recomputed from current index prices and the cross-margin
+    /// aggregates (total notional, total unrealised PnL, used margin, free
+    /// collateral). Stored positions only carry the entry-time snapshot;
+    /// without this pass the Portfolio page shows 0/$0 across the board
+    /// because the handler was emitting the raw stored fields.
+    pub fn account_summary(&self, address: &str) -> PositionsResponse {
+        let usdc_scale = Decimal::from(1_000_000u64);
+        let bps_scale = Decimal::from(10_000u64);
+
+        let mut positions = self.positions_for(address);
+        let collateral_str = self.vault_balance(address);
+        let collateral_dollars = collateral_str
+            .parse::<Decimal>()
+            .unwrap_or_default()
+            / usdc_scale;
+
+        let mut total_notional = Decimal::ZERO;
+        let mut total_pnl = Decimal::ZERO;
+        let mut used_margin = Decimal::ZERO;
+
+        for p in positions.iter_mut() {
+            let size: Decimal = p.size.parse().unwrap_or_default();
+            if size.is_zero() {
+                continue;
+            }
+            let entry = unscale_x18(&p.entry_price_x18);
+            // Mark price tracks the market's static index price until an
+            // oracle relayer is wired (see /v1/markets seed values). Good
+            // enough to surface a non-zero PnL the instant the user opens a
+            // position; once the relayer ships this pulls from a live feed.
+            let mark = match self.market(&p.market_id) {
+                Some(m) => unscale_x18(&m.index_price_x18),
+                None => entry,
+            };
+            let im_ratio_bps = self
+                .market(&p.market_id)
+                .map(|m| Decimal::from(m.im_ratio_bps as u64))
+                .unwrap_or_else(|| Decimal::from(500u64));
+            let im_ratio = im_ratio_bps / bps_scale;
+
+            let notional = size * mark;
+            let pnl = if p.side == "long" {
+                size * (mark - entry)
+            } else {
+                size * (entry - mark)
+            };
+            let im = notional * im_ratio;
+
+            p.mark_price_x18 = scale_x18(mark);
+            p.unrealised_pnl_usdc = scale_usdc6(pnl);
+            p.notional_usdc = scale_usdc6(notional);
+
+            total_notional += notional;
+            total_pnl += pnl;
+            used_margin += im;
+        }
+
+        let free = {
+            let raw = collateral_dollars + total_pnl - used_margin;
+            if raw < Decimal::ZERO { Decimal::ZERO } else { raw }
+        };
+
+        PositionsResponse {
+            collateral_usdc: collateral_str,
+            free_collateral_usdc: scale_usdc6(free),
+            total_unrealised_pnl_usdc: scale_usdc6(total_pnl),
+            total_notional_usdc: scale_usdc6(total_notional),
+            positions,
+        }
     }
 
     pub fn vault_balance(&self, address: &str) -> String {

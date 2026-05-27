@@ -377,15 +377,11 @@ pub async fn list_positions(
     // Lazy seed covers wallets that minted a JWT before dev-seed was wired
     // (cached localStorage tokens). No-op in prod.
     state.seed_dev_vault(&user.address);
-    let positions = state.positions_for(&user.address);
-    let collateral = state.vault_balance(&user.address);
-    Ok(Json(PositionsResponse {
-        collateral_usdc: collateral.clone(),
-        free_collateral_usdc: collateral,
-        total_unrealised_pnl_usdc: "0".into(),
-        total_notional_usdc: "0".into(),
-        positions,
-    }))
+    // account_summary recomputes mark/PnL per position from live index
+    // prices and rolls up the cross-margin aggregates. Without it the
+    // Portfolio page reads $0 across Unrealised PnL / Total notional /
+    // Used margin no matter how many positions are open.
+    Ok(Json(state.account_summary(&user.address)))
 }
 
 // -- 1.9 GET /v1/fills --------------------------------------------------------
