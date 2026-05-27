@@ -1,5 +1,12 @@
 import type { WsMessage, WsOutbound } from "@/lib/types/contract";
 
+function clearStoredJwtOnUnauthorized() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("perplex.jwt");
+  window.localStorage.removeItem("perplex.jwt.expiresAt");
+  window.dispatchEvent(new Event("perplex.jwt.change"));
+}
+
 type Listener = (msg: WsMessage) => void;
 
 interface PerplexWsOpts {
@@ -66,8 +73,17 @@ export class PerplexWs {
       for (const fn of this.listeners) fn(parsed as WsMessage);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (ev) => {
       this.ws = null;
+      // Edge closes with 3000 + reason "Unauthorized: invalid key" when the
+      // bearer JWT is dead. Mirror the REST-side behaviour from #125: drop
+      // the stored token + emit the change event so the wallet UI prompts
+      // for a fresh SIWE, and stop reconnecting until that lands.
+      if (ev.code === 3000) {
+        clearStoredJwtOnUnauthorized();
+        this.closed = true;
+        return;
+      }
       if (!this.closed) this.scheduleReconnect();
     };
 
@@ -119,12 +135,19 @@ export class PerplexWs {
 
   setToken(token: string | null) {
     this.opts.token = token;
+    // A token change is the recovery point after a 3000 close — clear the
+    // closed flag so the next connect() actually fires. Without this, once
+    // we mark closed=true to suppress reconnect storms, the WS never wakes
+    // up again even after the user re-signs SIWE.
+    this.closed = false;
     if (this.ws) {
       try {
         this.ws.close();
       } catch {
         // ignore
       }
+    } else {
+      this.connect();
     }
   }
 

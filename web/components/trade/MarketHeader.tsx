@@ -99,7 +99,11 @@ export function MarketHeader({ marketId, market }: Props) {
         </Stat>
 
         <Stat label="Next funding">
-          <span className="font-mono text-xs text-fg">
+          {/* Countdown is computed from Date.now() — server and client render
+              with a 1-second drift, which Next 16's strict hydration flags.
+              suppressHydrationWarning is the prescribed escape hatch for
+              clock-driven children. */}
+          <span className="font-mono text-xs text-fg" suppressHydrationWarning>
             {formatCountdown(nextFundingTsNs)}
           </span>
         </Stat>
