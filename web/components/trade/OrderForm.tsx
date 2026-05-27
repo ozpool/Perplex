@@ -165,13 +165,29 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
     };
 
     try {
-      await place.mutateAsync(req);
+      const ack = await place.mutateAsync(req);
       removeOpt(clientOrderId);
-      const title = type === "market" ? "Position opened" : "Order placed";
-      const body = `${side === "buy" ? "Long" : "Short"} ${optimisticQty} ${market.base}`;
+      // Surface the actual fill outcome from the edge instead of always
+      // saying "Order placed". A limit submitted at a price that crosses the
+      // book gets filled immediately and never appears in the Open Orders
+      // tab, which used to look like a silent failure to the user.
+      const direction = side === "buy" ? "Long" : "Short";
+      const sizeLabel = `${optimisticQty} ${market.base}`;
+      let title: string;
+      let body: string;
+      if (ack.status === "filled") {
+        title = type === "market" ? "Position opened" : "Limit filled at market";
+        body = `${direction} ${sizeLabel}`;
+      } else if (ack.status === "partial") {
+        title = "Order partially filled";
+        body = `${direction} ${sizeLabel} — remainder rests on the book.`;
+      } else {
+        title = "Order placed";
+        body = `${direction} ${sizeLabel} — waiting on the book.`;
+      }
       celebrate({ title, body });
       pushToast({ kind: "success", title, body });
-      if (type === "market") setQtyInput("");
+      if (type === "market" || ack.status === "filled") setQtyInput("");
     } catch (e) {
       removeOpt(clientOrderId);
       const msg = e instanceof Error ? e.message : "Unknown error";
@@ -330,9 +346,10 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
           <Row label="Est. fee" value={fee ? `$${commaFmt(fee, 2)}` : "—"} muted />
           <div className="border-t border-border my-0.5" />
           <Row
-            label="Liquidation price"
+            label={`Liquidation @ ${leverage}x`}
             value={liqEst !== null ? `$${commaFmt(liqEst, tickDec)}` : "—"}
             highlight={liqEst !== null ? "warn" : undefined}
+            help={`Liq. price is a function of entry price, leverage and side — it does not depend on size. Move the leverage slider to see it shift. Current entry assumption: $${commaFmt(effPrice, tickDec)} (${side}).`}
           />
           <Row label="Free collateral" value={free !== null ? `$${commaFmt(free, 2)}` : "—"} muted />
         </div>
@@ -393,11 +410,13 @@ function Row({
   value,
   muted,
   highlight,
+  help,
 }: {
   label: string;
   value: string;
   muted?: boolean;
   highlight?: "warn" | "short";
+  help?: string;
 }) {
   const valueClass = highlight === "warn"
     ? "text-warn"
@@ -405,8 +424,11 @@ function Row({
       ? "text-short font-semibold"
       : muted ? "text-fg-mid" : "text-fg";
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-fg-muted">{label}</span>
+    <div className="flex items-center justify-between" title={help}>
+      <span className="text-fg-muted inline-flex items-center gap-1">
+        {label}
+        {help && <InfoDot />}
+      </span>
       <span className={cn("font-mono tabular-nums", valueClass)}>{value}</span>
     </div>
   );

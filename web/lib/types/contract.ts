@@ -79,9 +79,15 @@ export interface OrderRequest {
   signature: string;
 }
 
+// The edge returns "filled" when the whole taker qty crossed the book,
+// "partial" when only some did and the remainder rests, or "accepted" when
+// nothing crossed and the order rests untouched (limit-only). Widening the
+// type here so the FE can pick the right success copy per outcome.
+export type OrderAckStatus = "accepted" | "partial" | "filled";
+
 export interface OrderAck {
   orderId: string;
-  status: "accepted";
+  status: OrderAckStatus;
   tsNs: string;
 }
 
