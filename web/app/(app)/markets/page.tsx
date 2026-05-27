@@ -135,7 +135,7 @@ export default function MarketsPage() {
           <span className="text-right">Mark price</span>
           <span className="text-right">24h change</span>
           <span className="text-right">24h volume</span>
-          <span className="text-right">Funding (1h)</span>
+          <span className="text-right">Funding (8h)</span>
           <span className="text-right">Max leverage</span>
           <span className="w-20" />
         </div>
