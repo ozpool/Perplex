@@ -26,7 +26,14 @@ import urllib.request
 import urllib.error
 
 EDGE = os.environ.get("PERPLEX_EDGE_URL", "http://127.0.0.1:8080")
-ACCOUNT = os.environ.get("SEED_ACCOUNT", "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")
+# Default to anvil account #1. Anvil account #0 is the canonical "user wallet"
+# in dev (MetaMask import / wagmi mock connector), so seeding from there would
+# put both sides of every match on the same address. The edge's matcher has no
+# self-trade prevention (perplex-matching does, but the edge has its own
+# simpler matcher in state.rs), so a self-match upserts +qty long AND -qty
+# short into the same position, netting to zero — fills tab populates but
+# positions tab stays empty. Account #1 keeps the maker side cleanly separate.
+ACCOUNT = os.environ.get("SEED_ACCOUNT", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
 QTY = os.environ.get("SEED_QTY", "0.05")
 SPREAD_BPS = float(os.environ.get("SEED_SPREAD_BPS", "50"))
 POLL_MS = int(os.environ.get("POLL_MS", "2000"))
