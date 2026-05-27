@@ -60,11 +60,31 @@ SIG = "0x" + "0" * 130
 
 
 def mint_token() -> str:
-    with urllib.request.urlopen(f"{EDGE}/__dev/token/{ACCOUNT}", timeout=5) as r:
-        return json.load(r)["jwt"]
+    """Block until the edge gives us a JWT. Used at boot and after any
+    auth failure (e.g. edge process restarted and rolled its signing key,
+    invalidating the bearer we were holding). Never raises — keeps
+    retrying so the seeder can survive transient edge outages mid-demo."""
+    backoff = 0.5
+    while True:
+        try:
+            with urllib.request.urlopen(
+                f"{EDGE}/__dev/token/{ACCOUNT}", timeout=5
+            ) as r:
+                return json.load(r)["jwt"]
+        except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+            print(
+                f"[seed-book] mint_token retry after {e!r} (sleep {backoff:.1f}s)",
+                flush=True,
+            )
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 10.0)
 
 
 def post_order(token: str, market: str, side: str, price: float, qty: float, cid: str) -> str:
+    """Returns the new order id, or empty string if the edge wasn't reachable.
+    HTTPError (4xx/5xx with a body) is re-raised so the caller can read the
+    server's response — network-level errors get swallowed and logged so a
+    single dropped tick doesn't kill the whole seeder."""
     body = json.dumps(
         {
             "marketId": market,
@@ -88,11 +108,22 @@ def post_order(token: str, market: str, side: str, price: float, qty: float, cid
             "content-type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=5) as r:
-        return json.load(r)["orderId"]
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.load(r)["orderId"]
+    except urllib.error.HTTPError:
+        # Let the caller handle 4xx/5xx — they need to read the body to
+        # decide whether to retry, re-auth, or back off.
+        raise
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+        print(f"[seed-book] post_order network error: {e!r}", flush=True)
+        return ""
 
 
 def cancel(token: str, order_id: str) -> None:
+    """Best-effort cancel. Eats every network and HTTP error — a stale
+    order id is harmless (404), and a transient connection refused during
+    an edge restart must not kill the seeder process."""
     if not order_id:
         return
     req = urllib.request.Request(
@@ -105,6 +136,11 @@ def cancel(token: str, order_id: str) -> None:
     except urllib.error.HTTPError:
         # Order already filled / cancelled — fine.
         pass
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as e:
+        # Edge is mid-restart or otherwise unreachable. The stale id is
+        # gone for free when the edge wipes its in-memory book, so this
+        # is safe to drop.
+        print(f"[seed-book] cancel skipped ({e!r})", flush=True)
 
 
 def main() -> int:
@@ -161,12 +197,28 @@ def main() -> int:
                         token, market, "sell", ask_px, qty,
                         f"seed-{market}-ask-{seq}-{lvl}"
                     )
-                    posted.append(bid_id)
-                    posted.append(ask_id)
+                    if bid_id:
+                        posted.append(bid_id)
+                    if ask_id:
+                        posted.append(ask_id)
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode(errors="replace")
                 print(f"[seed-book] {market} POST failed: {e.code} {err_body}", flush=True)
-                # Roll back what we did manage to post so the next tick starts clean.
+                # 401 / 403 means the edge restarted and our JWT is dead —
+                # re-mint and keep going. Anything else (rate limit, bad
+                # market id, etc) is fine to retry next tick.
+                if e.code in (401, 403):
+                    print("[seed-book] auth expired, re-minting JWT", flush=True)
+                    token = mint_token()
+                for oid in posted:
+                    cancel(token, oid)
+                last_ids[market] = []
+                continue
+            except Exception as e:
+                # Catch-all so a single bad tick never kills the seeder
+                # mid-demo. Examples: edge bound on the wrong port, DNS
+                # blip, JSON decode failure on a partial response.
+                print(f"[seed-book] {market} tick error: {e!r}", flush=True)
                 for oid in posted:
                     cancel(token, oid)
                 last_ids[market] = []
