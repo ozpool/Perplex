@@ -41,7 +41,7 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const removeOpt = useUi((s) => s.removeOptimisticOrder);
 
   const [side, setSide] = useState<Side>("buy");
-  const [type, setType] = useState<OrderTypeUi>("limit");
+  const [type, setType] = useState<OrderTypeUi>("market");
   const [priceInput, setPriceInput] = useState<string>("");
   const [qtyInput, setQtyInput] = useState<string>("");
   const [leverage, setLeverage] = useState<number>(2);
