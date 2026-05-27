@@ -258,6 +258,59 @@ function OrdersTable({
   );
 }
 
+// A single order can fill across multiple price levels (e.g. a market Buy
+// sweeps both 99950 ask and 100250 ask). The edge records each match as its
+// own row, which is correct — but reading the Fills tab, the user sees the
+// same orderId twice and reasonably wonders if there's a duplicate. Group by
+// orderId here so one order = one row, showing the volume-weighted average
+// price + total qty + total notional. The Size column carries the (n) suffix
+// when an order actually fanned out, so the underlying multi-level structure
+// is still visible if anyone cares to look.
+function aggregateFills(fills: import("@/lib/types/contract").Fill[]) {
+  const groups = new Map<string, {
+    id: string;
+    orderId: string;
+    marketId: import("@/lib/types/contract").MarketId;
+    side: import("@/lib/types/contract").Fill["side"];
+    role: import("@/lib/types/contract").Fill["role"];
+    qty: number;
+    notional: number;
+    fee: number;
+    tsNs: string;
+    legs: number;
+  }>();
+  for (const f of fills) {
+    const key = f.orderId;
+    const qty = Number(f.qty);
+    const px = Number(f.price);
+    const fee = Number(f.feeUsdc);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        id: f.id,
+        orderId: f.orderId,
+        marketId: f.marketId,
+        side: f.side,
+        role: f.role,
+        qty,
+        notional: qty * px,
+        fee,
+        tsNs: f.tsNs,
+        legs: 1,
+      });
+    } else {
+      existing.qty += qty;
+      existing.notional += qty * px;
+      existing.fee += fee;
+      // Keep the earliest timestamp for the grouped row so multi-level fills
+      // appear at the moment the order was submitted, not mid-fanout.
+      if (BigInt(f.tsNs) < BigInt(existing.tsNs)) existing.tsNs = f.tsNs;
+      existing.legs += 1;
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => (BigInt(b.tsNs) > BigInt(a.tsNs) ? 1 : -1));
+}
+
 function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] }) {
   if (fills.length === 0) {
     return (
@@ -266,6 +319,7 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
       </div>
     );
   }
+  const rows = aggregateFills(fills);
   return (
     <table className="w-full text-xs">
       <thead>
@@ -273,7 +327,7 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
           <Th>Time</Th>
           <Th>Market</Th>
           <Th>Side</Th>
-          <Th align="right">Price</Th>
+          <Th align="right">Avg price</Th>
           <Th align="right">Size</Th>
           <Th align="right">Total</Th>
           <Th align="right">Fee</Th>
@@ -281,18 +335,24 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
         </tr>
       </thead>
       <tbody>
-        {fills.map((f) => (
-          <tr key={f.id} className="border-t border-border hover:bg-bg-2">
-            <Td>{formatDateTime(f.tsNs)}</Td>
-            <Td>{f.marketId.toUpperCase()}</Td>
-            <Td className={f.side === "buy" ? "text-long" : "text-short"}>{f.side === "buy" ? "Buy" : "Sell"}</Td>
-            <Td align="right"><NumberDisplay value={f.price} decimals={2} /></Td>
-            <Td align="right"><NumberDisplay value={f.qty} decimals={4} /></Td>
-            <Td align="right"><NumberDisplay value={Number(f.price) * Number(f.qty)} decimals={2} prefix="$" /></Td>
-            <Td align="right"><NumberDisplay value={usdc6ToDollars(f.feeUsdc)} decimals={2} prefix="$" /></Td>
-            <Td className="text-fg-muted">{f.role}</Td>
-          </tr>
-        ))}
+        {rows.map((r) => {
+          const avgPx = r.qty > 0 ? r.notional / r.qty : 0;
+          return (
+            <tr key={r.orderId} className="border-t border-border hover:bg-bg-2">
+              <Td>{formatDateTime(r.tsNs)}</Td>
+              <Td>{r.marketId.toUpperCase()}</Td>
+              <Td className={r.side === "buy" ? "text-long" : "text-short"}>{r.side === "buy" ? "Buy" : "Sell"}</Td>
+              <Td align="right"><NumberDisplay value={avgPx} decimals={2} /></Td>
+              <Td align="right">
+                <NumberDisplay value={r.qty} decimals={4} />
+                {r.legs > 1 && <span className="ml-1 text-fg-muted text-[10px]">({r.legs} fills)</span>}
+              </Td>
+              <Td align="right"><NumberDisplay value={r.notional} decimals={2} prefix="$" /></Td>
+              <Td align="right"><NumberDisplay value={usdc6ToDollars(r.fee)} decimals={2} prefix="$" /></Td>
+              <Td className="text-fg-muted">{r.role}</Td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
