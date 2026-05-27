@@ -13,7 +13,7 @@ import {
   ORDER_DOMAIN,
   ORDER_TYPES,
 } from "@/lib/eip712/order";
-import { nowTsNs, usdc6ToDollars } from "@/lib/format/number";
+import { nowTsNs, usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -49,12 +49,12 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const [reduceOnly, setReduceOnly] = useState(false);
   const [postOnly, setPostOnly] = useState(false);
 
-  const oraclePx = oracle ? Number(oracle.priceX18) : null;
-  // Fallback when the oracle WS hasn't ticked yet (no relayer running locally):
-  // /v1/markets always carries the seed price as an x18 integer. Down-scale and
-  // use it so the ticket math (quick-percent buttons, optimistic price) has a
-  // sane anchor even before the first WS oracle frame. See #112.
-  const markPx = oraclePx ?? (market ? Number(market.indexPriceX18) / 1e18 : null);
+  // priceX18 is the 1e18-scaled raw integer; descale to dollars so all the
+  // ticket math (notional, liq, quick-percent sizing) uses real numbers
+  // instead of multiplying by 1e18. Falls back to the static seed indexPriceX18
+  // from /v1/markets when the WS hasn't ticked yet — same scaling convention.
+  const oraclePx = oracle ? x18ToDollars(oracle.priceX18) : null;
+  const markPx = oraclePx ?? (market ? x18ToDollars(market.indexPriceX18) : null);
   const tickDec = market ? Math.max(2, decOf(market.tickSize)) : 2;
   const lotDec = market ? decOf(market.lotSize) : 4;
 

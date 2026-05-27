@@ -7,6 +7,7 @@ import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { useUi } from "@/lib/store/ui-store";
 import { CoinIcon } from "@/components/markets/CoinIcon";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
+import { x18ToDollars } from "@/lib/format/number";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { ErrorState } from "@/components/common/ErrorState";
@@ -157,7 +158,9 @@ function FeaturedCard({ market }: { market: Market }) {
   const funding = useLiveFunding(market.id);
   const setMarket = useUi((s) => s.setSelectedMarket);
 
-  const price = oracle ? Number(oracle.priceX18) : null;
+  // priceX18 is the 1e18-scaled integer wire format; descale before display
+  // or the card reads as a 22-digit number and the sparkline anchor blows up.
+  const price = oracle ? x18ToDollars(oracle.priceX18) : null;
   const change = pseudoChange(market);
   const fundingPct = funding ? funding.currentRateBps / 100 : null;
 
@@ -300,7 +303,8 @@ function MarketRow({ market }: { market: Market }) {
   const funding = useLiveFunding(market.id);
   const setMarket = useUi((s) => s.setSelectedMarket);
 
-  const price = oracle ? Number(oracle.priceX18) : null;
+  // Same descale as FeaturedCard — priceX18 is 1e18-scaled raw integer.
+  const price = oracle ? x18ToDollars(oracle.priceX18) : null;
   const fundingPct = funding ? funding.currentRateBps / 100 : null;
   const change = pseudoChange(market);
   const volume = pseudoVolume(market) * 1_000_000;
