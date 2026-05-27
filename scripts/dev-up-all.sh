@@ -96,12 +96,12 @@ EOF
 }
 
 # ----- step 1: dev-up (blocking) -------------------------------------------
-step "step 1/5  make dev-up   (foreground — waits for deploy + seed)"
+step "step 1/6  make dev-up   (foreground — waits for deploy + seed)"
 make dev-up
 ok "anvil + postgres + redis up; contracts deployed; wallets + market prices seeded"
 
 # ----- step 2: perplex-edge in a new window --------------------------------
-step "step 2/5  perplex-edge   (REST :8080, WS :8081)"
+step "step 2/6  perplex-edge   (REST :8080, WS :8081)"
 open_term "perplex-edge" \
 "PERPLEX_JWT_SECRET=dev-secret cargo run -p perplex-edge -- --bind 127.0.0.1:8080 --ws-bind 127.0.0.1:8081"
 ok "edge launching in a new Terminal window"
@@ -121,7 +121,7 @@ done
 [[ "$edge_up" -eq 1 ]] || fail "edge did not respond on :8080 within 60s — check the perplex-edge Terminal window"
 
 # ----- step 3: mint JWT + start counterparty bot ---------------------------
-step "step 3/5  perplex-cli quote   (counterparty bot)"
+step "step 3/6  perplex-cli quote   (counterparty bot)"
 
 TOKEN="$(curl -s "http://127.0.0.1:8080/__dev/token/${BOT_ACCOUNT}" | jq -r '.jwt // empty')"
 
@@ -148,14 +148,27 @@ else
   ok "counterparty bot launching"
 fi
 
-# ----- step 4: metrics stack in a new window -------------------------------
-step "step 4/5  prometheus + grafana"
+# ----- step 3.5: seed-book.py fallback maker -------------------------------
+# TODO(remove once `perplex-cli quote` reliably posts quotes again): the bot
+# currently goes silent under some startup races (metrics :9100 refused, no
+# place_order traffic). seed-book.py is a thin Python stand-in that keeps a
+# bid/ask pair refreshed around mid for every market so the FE always has
+# liquidity to take against. Runs on anvil #1 by default (distinct from the
+# bot's anvil #0 and the demo wallet's anvil #5), so positions still net out
+# correctly across all three sides.
+step "step 4/6  seed-book.py   (fallback maker — anvil #1)"
+open_term "perplex seed-book" \
+"python3 scripts/seed-book.py"
+ok "seed-book launching"
+
+# ----- step 5: metrics stack in a new window -------------------------------
+step "step 5/6  prometheus + grafana"
 open_term "perplex metrics" \
 "make metrics-up && echo '' && echo 'Grafana:    http://localhost:3001' && echo 'Prometheus: http://localhost:9090' && exec \$SHELL"
 ok "metrics stack launching"
 
 # ----- step 5: frontend in a new window ------------------------------------
-step "step 5/5  frontend  (dev:real — points at the live edge)"
+step "step 6/6  frontend  (dev:real — points at the live edge)"
 open_term "perplex web:dev:real" "pnpm web:dev:real"
 ok "frontend launching"
 
@@ -175,9 +188,10 @@ c_green "    addr: 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc"
 c_green "    pk:   0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
 c_green ""
 c_green "  Pre-demo checklist:"
-c_green "    - edge window: tracing lines flowing, no panics"
-c_green "    - bot window:  'computed quotes' logging per market"
-c_green "    - book:        curl /v1/orderbook/btc-usd shows bids + asks"
+c_green "    - edge window:       tracing lines flowing, no panics"
+c_green "    - bot window:        'computed quotes' logging per market (broken — seed-book covers)"
+c_green "    - seed-book window:  '[seed-book] tick N posted' every 2s"
+c_green "    - book:              curl /v1/orderbook/btc-usd shows bids + asks"
 c_green "    - frontend:    /markets renders 3 markets, /trade has a live book"
 c_green ""
 c_green "  Tear down:"
