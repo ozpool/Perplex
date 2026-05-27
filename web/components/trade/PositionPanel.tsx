@@ -270,6 +270,7 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
           <Th>Side</Th>
           <Th align="right">Price</Th>
           <Th align="right">Size</Th>
+          <Th align="right">Total</Th>
           <Th align="right">Fee</Th>
           <Th>Role</Th>
         </tr>
@@ -282,6 +283,7 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
             <Td className={f.side === "buy" ? "text-long" : "text-short"}>{f.side === "buy" ? "Buy" : "Sell"}</Td>
             <Td align="right"><NumberDisplay value={f.price} decimals={2} /></Td>
             <Td align="right"><NumberDisplay value={f.qty} decimals={4} /></Td>
+            <Td align="right"><NumberDisplay value={Number(f.price) * Number(f.qty)} decimals={2} prefix="$" /></Td>
             <Td align="right"><NumberDisplay value={f.feeUsdc} decimals={2} prefix="$" /></Td>
             <Td className="text-fg-muted">{f.role}</Td>
           </tr>
