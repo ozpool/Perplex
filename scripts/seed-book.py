@@ -11,7 +11,7 @@ Env knobs:
   PERPLEX_EDGE_URL   default http://127.0.0.1:8080
   SEED_ACCOUNT       default 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
   SEED_MARKETS       "btc-usd:100000,eth-usd:3500,sol-usd:200" (default)
-  SEED_QTY           default 0.05
+  SEED_QTY           default 0.1  (innermost rung qty; grows by QTY_GROWTH each rung)
   SEED_SPREAD_BPS    default 50  (25 bps each side of mid)
   POLL_MS            default 2000
 """
@@ -37,8 +37,13 @@ ACCOUNT = os.environ.get("SEED_ACCOUNT", "0x70997970C51812dc3A010C7d01b50e0d17dc
 # Base size for the first (innermost) ladder rung. Each subsequent rung
 # multiplies by QTY_GROWTH so the book densifies outward — small market
 # orders fill at the tight inner spread, big sweeps walk into worse prices
-# the way a real DEX feels.
-QTY = float(os.environ.get("SEED_QTY", "10"))
+# the way a real DEX feels. Inner rung is deliberately small (0.1 base
+# units) so a typical demo size (0.2–2 BTC) walks at least two price
+# levels — otherwise the VWAP collapses to the innermost ask and the
+# liquidation preview reads as a flat number per leverage regardless of
+# size, which looks broken. Ladder total with defaults: 0.1 + 0.2 + 0.4
+# + 0.8 + 1.6 = 3.1 base units per side.
+QTY = float(os.environ.get("SEED_QTY", "0.1"))
 QTY_GROWTH = float(os.environ.get("SEED_QTY_GROWTH", "2"))
 # Distance of the innermost level from mid, in basis points (one side).
 # Each rung steps out by SPREAD_STEP_BPS so prices fan out monotonically.
