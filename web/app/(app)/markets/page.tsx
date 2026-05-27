@@ -144,7 +144,7 @@ export default function MarketsPage() {
         ))}
 
         {!isLoading && markets.length === 0 && (
-          <div className="p-10 text-center text-sm text-fg-mid">No markets match "{query}".</div>
+          <div className="p-10 text-center text-sm text-fg-mid">No markets match &quot;{query}&quot;.</div>
         )}
       </Card>
     </div>

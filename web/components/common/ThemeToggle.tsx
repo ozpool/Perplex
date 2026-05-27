@@ -22,14 +22,22 @@ interface Props {
 }
 
 export function ThemeToggle({ variant = "app" }: Props) {
-  const [theme, setTheme] = useState<Theme>("light");
+  // Lazy initializer reads from localStorage once on mount — keeps the
+  // post-mount setTheme out of useEffect (react-hooks/set-state-in-effect).
+  const [theme, setTheme] = useState<Theme>(readInitial);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const t = readInitial();
-    setTheme(t);
-    applyTheme(t);
+    applyTheme(theme);
+    // SSR renders without window so the mounted gate hides theme-dependent
+    // children until first client paint. eslint-disable below: the rule
+    // flags setState-in-effect, but this is exactly the "mark as mounted"
+    // pattern Next.js examples use for hydration-safe rendering.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMounted(true);
+    // theme is read from localStorage in the initializer, so the apply pass
+    // only needs to run once on mount — dep array intentionally empty.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggle = () => {
