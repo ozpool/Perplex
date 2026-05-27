@@ -1,5 +1,21 @@
 // Numeric formatting helpers. All inputs are decimal strings per contract.
 
+// USDC values on the wire carry 6-decimal precision (matching the ERC-20).
+// Every render site that wants a human dollar number must descale.
+export function usdc6ToDollars(raw: string | number | null | undefined): number {
+  if (raw === null || raw === undefined || raw === "") return NaN;
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  return n / 1e6;
+}
+
+// Price/PnL fields that ship as x18 fixed-point (entry, mark, liquidation,
+// oracle priceX18, indexPriceX18).
+export function x18ToDollars(raw: string | number | null | undefined): number {
+  if (raw === null || raw === undefined || raw === "") return NaN;
+  const n = typeof raw === "string" ? Number(raw) : raw;
+  return n / 1e18;
+}
+
 export function tickPrecision(tickSize: string): number {
   const i = tickSize.indexOf(".");
   if (i < 0) return 0;

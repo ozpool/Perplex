@@ -13,7 +13,7 @@ import {
   ORDER_DOMAIN,
   ORDER_TYPES,
 } from "@/lib/eip712/order";
-import { nowTsNs } from "@/lib/format/number";
+import { nowTsNs, usdc6ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -83,7 +83,7 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
   const fee = notional * (feeBps / 10000);
   const liqEst = sideLiqEstimate(side, effPrice, leverage, market);
 
-  const free = freeCollateralUsdc ? Number(freeCollateralUsdc) : null;
+  const free = freeCollateralUsdc ? usdc6ToDollars(freeCollateralUsdc) : null;
   const insufficient = free !== null && margin > free;
 
   const canSubmit =
