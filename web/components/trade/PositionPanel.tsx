@@ -159,7 +159,7 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
             <Td align="right">
               <Button
                 size="sm"
-                variant="ghost"
+                variant="danger"
                 disabled={closingId === p.marketId}
                 onClick={async () => {
                   setClosingId(p.marketId);
