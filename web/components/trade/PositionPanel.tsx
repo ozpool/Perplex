@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { formatTimeOfDay, formatDateTime } from "@/lib/format/number";
 import { Button } from "@/components/ui/Button";
 import { useUi } from "@/lib/store/ui-store";
+import { useClosePosition } from "@/lib/trade/use-close-position";
 import { cn } from "@/lib/cn";
 import type { MarketId } from "@/lib/types/contract";
 
@@ -96,6 +97,9 @@ export function PositionPanel({ marketId }: { marketId?: MarketId }) {
 }
 
 function PositionsTable({ positions }: { positions: import("@/lib/types/contract").Position[] }) {
+  const closePosition = useClosePosition();
+  const [closingId, setClosingId] = useState<string | null>(null);
+
   if (positions.length === 0) {
     return (
       <div className="p-6">
@@ -116,6 +120,7 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
           <Th align="right">Leverage</Th>
           <Th align="right">Liq. price</Th>
           <Th align="right">Funding</Th>
+          <Th align="right" />
         </tr>
       </thead>
       <tbody>
@@ -150,6 +155,23 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
             </Td>
             <Td align="right">
               <NumberDisplay value={p.fundingPaidUsdc} decimals={2} prefix="$" signed colorBySign />
+            </Td>
+            <Td align="right">
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={closingId === p.marketId}
+                onClick={async () => {
+                  setClosingId(p.marketId);
+                  try {
+                    await closePosition(p);
+                  } finally {
+                    setClosingId(null);
+                  }
+                }}
+              >
+                {closingId === p.marketId ? "Closing…" : "Close"}
+              </Button>
             </Td>
           </tr>
         ))}
