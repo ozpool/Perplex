@@ -116,6 +116,7 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
           <Th align="right">Size</Th>
           <Th align="right">Entry</Th>
           <Th align="right">Mark</Th>
+          <Th align="right">Notional</Th>
           <Th align="right">PnL</Th>
           <Th align="right">Leverage</Th>
           <Th align="right">Liq. price</Th>
@@ -138,8 +139,9 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
               </span>
             </Td>
             <Td align="right"><NumberDisplay value={p.size} decimals={4} /></Td>
-            <Td align="right"><NumberDisplay value={p.entryPriceX18} decimals={2} prefix="$" /></Td>
-            <Td align="right"><NumberDisplay value={p.markPriceX18} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={Number(p.entryPriceX18) / 1e18} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={Number(p.markPriceX18) / 1e18} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={Number(p.notionalUsdc) / 1e6} decimals={2} prefix="$" /></Td>
             <Td align="right">
               <NumberDisplay
                 value={p.unrealisedPnlUsdc}
@@ -151,7 +153,7 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
             </Td>
             <Td align="right">{Number(p.leverage).toFixed(1)}x</Td>
             <Td align="right" className="text-warn">
-              <NumberDisplay value={p.liquidationPriceX18} decimals={2} prefix="$" className="text-warn" />
+              <NumberDisplay value={Number(p.liquidationPriceX18) / 1e18} decimals={2} prefix="$" className="text-warn" />
             </Td>
             <Td align="right">
               <NumberDisplay value={p.fundingPaidUsdc} decimals={2} prefix="$" signed colorBySign />
@@ -207,6 +209,7 @@ function OrdersTable({
           <Th>Type</Th>
           <Th align="right">Price</Th>
           <Th align="right">Filled / Size</Th>
+          <Th align="right">Total</Th>
           <Th align="right" />
         </tr>
       </thead>
@@ -227,6 +230,7 @@ function OrdersTable({
               <NumberDisplay value={Number(o.qty) - Number(o.remaining)} decimals={4} className="text-fg-mid" /> /{" "}
               <NumberDisplay value={o.qty} decimals={4} />
             </Td>
+            <Td align="right"><NumberDisplay value={Number(o.price) * Number(o.qty)} decimals={2} prefix="$" /></Td>
             <Td align="right" />
           </tr>
         ))}
@@ -241,6 +245,7 @@ function OrdersTable({
               <NumberDisplay value={Number(o.qty) - Number(o.remaining)} decimals={4} className="text-fg-mid" /> /{" "}
               <NumberDisplay value={o.qty} decimals={4} />
             </Td>
+            <Td align="right"><NumberDisplay value={Number(o.price) * Number(o.qty)} decimals={2} prefix="$" /></Td>
             <Td align="right">
               <Button size="sm" variant="ghost" onClick={() => onCancel(o.id)}>
                 Cancel
