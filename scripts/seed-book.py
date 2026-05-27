@@ -34,14 +34,19 @@ EDGE = os.environ.get("PERPLEX_EDGE_URL", "http://127.0.0.1:8080")
 # short into the same position, netting to zero — fills tab populates but
 # positions tab stays empty. Account #1 keeps the maker side cleanly separate.
 ACCOUNT = os.environ.get("SEED_ACCOUNT", "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
-# 0.05 was just enough to prove the matching engine wired up end-to-end, but
-# meant a user typing any realistic size (e.g. 5 BTC) only got 0.05 filled and
-# the rest dropped by the market-order leftover policy. 100 covers any
-# reasonable demo entry without making the book look silly — the edge's
-# margin check (not the seeder) is what bounds what a wallet can actually
-# take down.
-QTY = os.environ.get("SEED_QTY", "100")
-SPREAD_BPS = float(os.environ.get("SEED_SPREAD_BPS", "50"))
+# Base size for the first (innermost) ladder rung. Each subsequent rung
+# multiplies by QTY_GROWTH so the book densifies outward — small market
+# orders fill at the tight inner spread, big sweeps walk into worse prices
+# the way a real DEX feels.
+QTY = float(os.environ.get("SEED_QTY", "10"))
+QTY_GROWTH = float(os.environ.get("SEED_QTY_GROWTH", "2"))
+# Distance of the innermost level from mid, in basis points (one side).
+# Each rung steps out by SPREAD_STEP_BPS so prices fan out monotonically.
+SPREAD_BPS = float(os.environ.get("SEED_SPREAD_BPS", "25"))
+SPREAD_STEP_BPS = float(os.environ.get("SEED_SPREAD_STEP_BPS", "15"))
+# Number of price levels per side. Five is plenty to make the slippage
+# preview meaningful without flooding the book.
+LADDER_LEVELS = int(os.environ.get("SEED_LADDER_LEVELS", "5"))
 POLL_MS = int(os.environ.get("POLL_MS", "2000"))
 MARKETS_RAW = os.environ.get(
     "SEED_MARKETS", "btc-usd:100000,eth-usd:3500,sol-usd:200"
@@ -54,14 +59,14 @@ def mint_token() -> str:
         return json.load(r)["jwt"]
 
 
-def post_order(token: str, market: str, side: str, price: float, cid: str) -> str:
+def post_order(token: str, market: str, side: str, price: float, qty: float, cid: str) -> str:
     body = json.dumps(
         {
             "marketId": market,
             "side": side,
             "type": "limit",
             "price": f"{price:.2f}",
-            "qty": QTY,
+            "qty": f"{qty:.4f}",
             "timeInForce": "gtc",
             "reduceOnly": False,
             "postOnly": False,
@@ -106,9 +111,10 @@ def main() -> int:
     print(f"[seed-book] minting dev JWT for {ACCOUNT}", flush=True)
     token = mint_token()
     print(
-        f"[seed-book] token ok; posting around "
-        f"{', '.join(f'{m}@{p}' for m, p in markets)} "
-        f"every {POLL_MS}ms (spread {SPREAD_BPS}bps, qty {QTY})",
+        f"[seed-book] token ok; laddering {LADDER_LEVELS} levels around "
+        f"{', '.join(f'{m}@{p}' for m, p in markets)} every {POLL_MS}ms "
+        f"(inner spread {SPREAD_BPS}bps, step {SPREAD_STEP_BPS}bps, "
+        f"qty base {QTY} × {QTY_GROWTH})",
         flush=True,
     )
 
@@ -128,25 +134,40 @@ def main() -> int:
     while True:
         seq += 1
         for market, mid in markets:
-            half = SPREAD_BPS / 10000 / 2
-            bid_px = mid * (1 - half)
-            ask_px = mid * (1 + half)
             for oid in last_ids[market]:
                 cancel(token, oid)
+            posted: list[str] = []
             try:
-                bid_id = post_order(
-                    token, market, "buy", bid_px, f"seed-{market}-bid-{seq}"
-                )
-                ask_id = post_order(
-                    token, market, "sell", ask_px, f"seed-{market}-ask-{seq}"
-                )
+                for lvl in range(LADDER_LEVELS):
+                    # Each ladder rung walks one SPREAD_STEP_BPS further from
+                    # mid, and grows qty by QTY_GROWTH. The closest rung is
+                    # at SPREAD_BPS (half-spread); the outermost rung is at
+                    # SPREAD_BPS + (LADDER_LEVELS - 1) * SPREAD_STEP_BPS.
+                    half_bps = SPREAD_BPS + lvl * SPREAD_STEP_BPS
+                    half = half_bps / 10000.0
+                    bid_px = mid * (1 - half)
+                    ask_px = mid * (1 + half)
+                    qty = QTY * (QTY_GROWTH ** lvl)
+                    bid_id = post_order(
+                        token, market, "buy", bid_px, qty,
+                        f"seed-{market}-bid-{seq}-{lvl}"
+                    )
+                    ask_id = post_order(
+                        token, market, "sell", ask_px, qty,
+                        f"seed-{market}-ask-{seq}-{lvl}"
+                    )
+                    posted.append(bid_id)
+                    posted.append(ask_id)
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode(errors="replace")
                 print(f"[seed-book] {market} POST failed: {e.code} {err_body}", flush=True)
+                # Roll back what we did manage to post so the next tick starts clean.
+                for oid in posted:
+                    cancel(token, oid)
                 last_ids[market] = []
                 continue
-            last_ids[market] = [bid_id, ask_id]
-        print(f"[seed-book] tick {seq} posted", flush=True)
+            last_ids[market] = posted
+        print(f"[seed-book] tick {seq} posted ({LADDER_LEVELS} levels per side)", flush=True)
         time.sleep(POLL_MS / 1000)
 
 
