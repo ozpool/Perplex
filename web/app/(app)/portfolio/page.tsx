@@ -4,17 +4,18 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
+import { usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 export default function PortfolioPage() {
   const { data: positions, isLoading } = usePositions();
   const { data: balance } = useBalance();
 
-  const collateral = positions ? Number(positions.collateralUsdc) : 0;
-  const free = positions ? Number(positions.freeCollateralUsdc) : 0;
+  const collateral = positions ? usdc6ToDollars(positions.collateralUsdc) : 0;
+  const free = positions ? usdc6ToDollars(positions.freeCollateralUsdc) : 0;
   const used = collateral - free;
-  const notional = positions ? Number(positions.totalNotionalUsdc) : 0;
-  const pnl = positions ? Number(positions.totalUnrealisedPnlUsdc) : 0;
+  const notional = positions ? usdc6ToDollars(positions.totalNotionalUsdc) : 0;
+  const pnl = positions ? usdc6ToDollars(positions.totalUnrealisedPnlUsdc) : 0;
   const accountEquity = collateral + pnl;
 
   return (
@@ -56,7 +57,7 @@ export default function PortfolioPage() {
           <div className="p-4 flex flex-col gap-3">
             <Bar label="Used margin" value={used} max={collateral} color="var(--warn)" />
             <Bar label="Free collateral" value={free} max={collateral} color="var(--long)" />
-            <Bar label="Wallet USDC" value={balance ? Number(balance.walletUsdcBalance) : 0} max={collateral} color="var(--accent)" />
+            <Bar label="Wallet USDC" value={balance ? usdc6ToDollars(balance.walletUsdcBalance) : 0} max={collateral} color="var(--accent)" />
           </div>
         </Card>
       </div>
@@ -103,12 +104,12 @@ export default function PortfolioPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right"><NumberDisplay value={p.size} decimals={4} /></td>
-                    <td className="px-4 py-3 text-right"><NumberDisplay value={p.notionalUsdc} decimals={2} prefix="$" /></td>
-                    <td className="px-4 py-3 text-right"><NumberDisplay value={p.entryPriceX18} decimals={2} prefix="$" /></td>
-                    <td className="px-4 py-3 text-right"><NumberDisplay value={p.markPriceX18} decimals={2} prefix="$" /></td>
-                    <td className="px-4 py-3 text-right"><NumberDisplay value={p.unrealisedPnlUsdc} decimals={2} signed prefix="$" colorBySign /></td>
+                    <td className="px-4 py-3 text-right"><NumberDisplay value={usdc6ToDollars(p.notionalUsdc)} decimals={2} prefix="$" /></td>
+                    <td className="px-4 py-3 text-right"><NumberDisplay value={x18ToDollars(p.entryPriceX18)} decimals={2} prefix="$" /></td>
+                    <td className="px-4 py-3 text-right"><NumberDisplay value={x18ToDollars(p.markPriceX18)} decimals={2} prefix="$" /></td>
+                    <td className="px-4 py-3 text-right"><NumberDisplay value={usdc6ToDollars(p.unrealisedPnlUsdc)} decimals={2} signed prefix="$" colorBySign /></td>
                     <td className="px-4 py-3 text-right text-warn">
-                      <NumberDisplay value={p.liquidationPriceX18} decimals={2} prefix="$" className="text-warn" />
+                      <NumberDisplay value={x18ToDollars(p.liquidationPriceX18)} decimals={2} prefix="$" className="text-warn" />
                     </td>
                   </tr>
                 ))}

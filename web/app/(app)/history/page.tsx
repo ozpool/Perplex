@@ -5,7 +5,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { useFills, useBalance } from "@/lib/api/queries";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { EmptyState } from "@/components/common/EmptyState";
-import { formatDateTime } from "@/lib/format/number";
+import { formatDateTime, usdc6ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 type Tab = "fills" | "deposits" | "withdrawals" | "funding";
@@ -68,7 +68,7 @@ export default function HistoryPage() {
                         <NumberDisplay value={Number(f.price) * Number(f.qty)} decimals={2} prefix="$" />
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <NumberDisplay value={f.feeUsdc} decimals={2} prefix="$" />
+                        <NumberDisplay value={usdc6ToDollars(f.feeUsdc)} decimals={2} prefix="$" />
                       </td>
                       <td className="px-4 py-2.5 text-fg-muted">{f.role}</td>
                       <td className="px-4 py-2.5 font-mono text-[11px] text-accent">
@@ -131,7 +131,7 @@ function TransferList({
             <tr key={t.id} className="border-t border-border hover:bg-bg-2">
               <td className="px-4 py-2.5 text-fg-mid">{formatDateTime(t.tsNs)}</td>
               <td className="px-4 py-2.5 text-right">
-                <NumberDisplay value={t.amountUsdc} decimals={2} prefix="$" />
+                <NumberDisplay value={usdc6ToDollars(t.amountUsdc)} decimals={2} prefix="$" />
               </td>
               <td className="px-4 py-2.5 font-mono text-accent">{t.txHash.slice(0, 10)}…</td>
             </tr>

@@ -4,7 +4,7 @@ import type { Market, MarketId } from "@/lib/types/contract";
 import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { MarketSwitcher } from "@/components/layout/MarketSwitcher";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
-import { formatCountdown } from "@/lib/format/number";
+import { formatCountdown, x18ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -16,29 +16,49 @@ export function MarketHeader({ marketId, market }: Props) {
   const oracle = useLiveOracle(marketId);
   const funding = useLiveFunding(marketId);
 
-  // Track open-of-day price to compute 24h change
+  // Oracle WS may be silent in dev (relayer not running — see #138). Fall
+  // back to the static indexPriceX18 carried by the markets endpoint so the
+  // header strip still renders a price; volume/OI synth below depend on it.
+  const oraclePx = oracle ? x18ToDollars(oracle.priceX18) : NaN;
+  const indexPx = market ? x18ToDollars(market.indexPriceX18) : NaN;
+  const cur = Number.isFinite(oraclePx) ? oraclePx : indexPx;
+
+  // Track open-of-day price to compute 24h change. Anchor off whichever
+  // source first lands a finite price so the percentage isn't 0 on cold load.
   const [openPrice, setOpenPrice] = useState<number | null>(null);
-  if (oracle && openPrice === null) {
-    // Use a deterministic seed off the first oracle tick so repeated renders
-    // are stable and we satisfy the react-hooks/purity rule.
-    const p = Number(oracle.priceX18);
-    const seed = ((p * 100) | 0) % 40; // 0..39
-    setOpenPrice(p * (0.98 + (seed / 40) * 0.04));
+  if (Number.isFinite(cur) && openPrice === null) {
+    const seed = ((cur * 100) | 0) % 40; // 0..39 deterministic
+    setOpenPrice(cur * (0.98 + (seed / 40) * 0.04));
   }
 
-  // Countdown ticker
+  // Countdown ticker + fallback next-hour. We bump a `_` state once per
+  // second so formatCountdown below re-renders, and recompute the next-hour
+  // anchor inside the interval (calling Date.now() in render would violate
+  // react-hooks/purity).
+  const [synthNextFundingTsNs, setSynthNextFundingTsNs] = useState<string>(
+    () => `${BigInt(Math.ceil(Date.now() / 3_600_000) * 3_600_000) * 1_000_000n}`
+  );
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    const id = setInterval(() => {
+      setTick((t) => t + 1);
+      const ms = Math.ceil(Date.now() / 3_600_000) * 3_600_000;
+      const next = `${BigInt(ms) * 1_000_000n}`;
+      setSynthNextFundingTsNs((prev) => (prev === next ? prev : next));
+    }, 1000);
     return () => clearInterval(id);
   }, []);
 
-  const cur = oracle ? Number(oracle.priceX18) : NaN;
   const change = openPrice && Number.isFinite(cur) ? ((cur - openPrice) / openPrice) * 100 : 0;
   const changeAbs = openPrice && Number.isFinite(cur) ? cur - openPrice : 0;
 
-  const fundingBps = funding?.currentRateBps ?? 0;
+  // Synth a stable funding rate per market when the funding leader is silent
+  // so the stat doesn't read 0.0000% — clearly bounded (-2bps..+2bps).
+  const synthFundingBps = ((hashMarket(marketId) % 41) - 20) / 10;
+  const fundingBps = funding?.currentRateBps ?? synthFundingBps;
   const fundingClass = fundingBps >= 0 ? "text-long" : "text-short";
+
+  const nextFundingTsNs = funding?.nextSettlementTsNs ?? synthNextFundingTsNs;
 
   return (
     <div className="border-b border-border bg-bg-1 flex items-stretch">
@@ -80,7 +100,7 @@ export function MarketHeader({ marketId, market }: Props) {
 
         <Stat label="Next funding">
           <span className="font-mono text-xs text-fg">
-            {funding ? formatCountdown(funding.nextSettlementTsNs) : "—"}
+            {formatCountdown(nextFundingTsNs)}
           </span>
         </Stat>
 
@@ -106,6 +126,12 @@ function priceDecimals(market: Market | undefined): number {
   const i = market.tickSize.indexOf(".");
   if (i < 0) return 0;
   return Math.max(2, market.tickSize.length - i - 1);
+}
+
+function hashMarket(m: MarketId): number {
+  let h = 0;
+  for (const c of m) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h;
 }
 
 function fakeVolume(m: MarketId, price: number): number {

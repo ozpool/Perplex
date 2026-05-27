@@ -4,7 +4,7 @@ import { Tabs } from "@/components/ui/Tabs";
 import { usePositions, useOpenOrders, useFills, useCancelOrder } from "@/lib/api/queries";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { EmptyState } from "@/components/common/EmptyState";
-import { formatTimeOfDay, formatDateTime } from "@/lib/format/number";
+import { formatTimeOfDay, formatDateTime, usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { Button } from "@/components/ui/Button";
 import { useUi } from "@/lib/store/ui-store";
 import { useClosePosition } from "@/lib/trade/use-close-position";
@@ -139,12 +139,12 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
               </span>
             </Td>
             <Td align="right"><NumberDisplay value={p.size} decimals={4} /></Td>
-            <Td align="right"><NumberDisplay value={Number(p.entryPriceX18) / 1e18} decimals={2} prefix="$" /></Td>
-            <Td align="right"><NumberDisplay value={Number(p.markPriceX18) / 1e18} decimals={2} prefix="$" /></Td>
-            <Td align="right"><NumberDisplay value={Number(p.notionalUsdc) / 1e6} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={x18ToDollars(p.entryPriceX18)} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={x18ToDollars(p.markPriceX18)} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={usdc6ToDollars(p.notionalUsdc)} decimals={2} prefix="$" /></Td>
             <Td align="right">
               <NumberDisplay
-                value={p.unrealisedPnlUsdc}
+                value={usdc6ToDollars(p.unrealisedPnlUsdc)}
                 decimals={2}
                 prefix="$"
                 signed
@@ -153,10 +153,10 @@ function PositionsTable({ positions }: { positions: import("@/lib/types/contract
             </Td>
             <Td align="right">{Number(p.leverage).toFixed(1)}x</Td>
             <Td align="right" className="text-warn">
-              <NumberDisplay value={Number(p.liquidationPriceX18) / 1e18} decimals={2} prefix="$" className="text-warn" />
+              <NumberDisplay value={x18ToDollars(p.liquidationPriceX18)} decimals={2} prefix="$" className="text-warn" />
             </Td>
             <Td align="right">
-              <NumberDisplay value={p.fundingPaidUsdc} decimals={2} prefix="$" signed colorBySign />
+              <NumberDisplay value={usdc6ToDollars(p.fundingPaidUsdc)} decimals={2} prefix="$" signed colorBySign />
             </Td>
             <Td align="right">
               <Button
@@ -289,7 +289,7 @@ function FillsTable({ fills }: { fills: import("@/lib/types/contract").Fill[] })
             <Td align="right"><NumberDisplay value={f.price} decimals={2} /></Td>
             <Td align="right"><NumberDisplay value={f.qty} decimals={4} /></Td>
             <Td align="right"><NumberDisplay value={Number(f.price) * Number(f.qty)} decimals={2} prefix="$" /></Td>
-            <Td align="right"><NumberDisplay value={f.feeUsdc} decimals={2} prefix="$" /></Td>
+            <Td align="right"><NumberDisplay value={usdc6ToDollars(f.feeUsdc)} decimals={2} prefix="$" /></Td>
             <Td className="text-fg-muted">{f.role}</Td>
           </tr>
         ))}

@@ -52,7 +52,7 @@ export default function MarketsPage() {
       <div className="max-w-[60ch]">
         <span className="inline-flex items-center gap-2 px-3 h-7 rounded-full bg-bg-1 border border-border-strong text-[11px] font-mono uppercase tracking-[0.18em] text-accent">
           <span className="size-1.5 rounded-full bg-accent pulse-dot" />
-          Live · arbitrum mainnet
+          {process.env.NEXT_PUBLIC_NETWORK_LABEL ?? "Local · dev"}
         </span>
         <h1 className="font-display text-[clamp(34px,4.4vw,56px)] font-semibold tracking-[-0.025em] text-fg mt-4 leading-[1.02]">
           Pick a market <span className="text-accent">to trade.</span>

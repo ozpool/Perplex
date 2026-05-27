@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useUi } from "@/lib/store/ui-store";
+import { usdc6ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 type Mode = "deposit" | "withdraw";
@@ -20,8 +21,8 @@ export default function WalletPage() {
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const walletBal = balance ? Number(balance.walletUsdcBalance) : 0;
-  const vaultBal = balance ? Number(balance.vaultBalanceUsdc) : 0;
+  const walletBal = balance ? usdc6ToDollars(balance.walletUsdcBalance) : 0;
+  const vaultBal = balance ? usdc6ToDollars(balance.vaultBalanceUsdc) : 0;
   const source = mode === "deposit" ? walletBal : vaultBal;
   const target = mode === "deposit" ? vaultBal : walletBal;
   const amt = Number(amount) || 0;
@@ -108,7 +109,7 @@ export default function WalletPage() {
               <div className="flex flex-col gap-1 text-[11px] border-t border-border pt-3">
                 <RowKV label="Available" value={`$${source.toFixed(2)}`} />
                 <RowKV label="After transfer" value={`$${(target + amt).toFixed(2)}`} />
-                <RowKV label="Network fee" value="~$0.12" muted />
+                <RowKV label="Network fee" value="est. on mainnet" muted />
               </div>
               <Button
                 size="lg"
