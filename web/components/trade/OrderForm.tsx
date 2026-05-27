@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useSignTypedData, useConnect } from "wagmi";
 import type { Market, MarketId, OrderRequest, OrderType, Side, TimeInForce } from "@/lib/types/contract";
-import { usePlaceOrder } from "@/lib/api/queries";
+import { usePlaceOrder, useOrderbookSnapshot } from "@/lib/api/queries";
 import { useLiveOracle } from "@/lib/ws/channels";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -70,13 +70,25 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
     lastTypeRef.current = type;
   }, [type, markPx, tickDec]);
 
-  const effPrice = useMemo(() => {
-    if (type === "market") return markPx ?? 0;
-    const n = Number(priceInput);
-    return Number.isFinite(n) ? n : 0;
-  }, [type, priceInput, markPx]);
+  // Live orderbook snapshot powers the slippage-aware fill-price preview.
+  // Without it the ticket math collapses to "mark price × qty" which makes
+  // every market order at the same leverage show the same liquidation
+  // number regardless of size — confusing for anyone used to a real DEX.
+  const { data: book } = useOrderbookSnapshot(marketId);
 
   const qty = Number(qtyInput) || 0;
+
+  // The price the order would average out at if it submitted right now.
+  // Walks the relevant book side for a market order (or a crossing limit),
+  // returning the volume-weighted price plus the remainder that wouldn't
+  // fill. For limit orders that don't cross, falls back to the user input.
+  const fillPreview = useMemo(
+    () => previewFill({ side, type, qty, priceInput, book, markPx }),
+    [side, type, qty, priceInput, book, markPx]
+  );
+
+  const effPrice = fillPreview.effPrice;
+
   const notional = effPrice * qty;
   const margin = leverage > 0 ? notional / leverage : 0;
   const feeBps = market?.takerFeeBps ?? 5;
@@ -576,4 +588,106 @@ function sideLiqEstimate(side: Side, price: number, leverage: number, market: Ma
     return price * (1 - 1 / leverage + mmRatio);
   }
   return price * (1 + 1 / leverage - mmRatio);
+}
+
+interface FillPreview {
+  effPrice: number;       // VWAP of what would fill, or limit price if it would rest
+  filledQty: number;      // how many contracts would actually fill
+  remaining: number;      // qty that wouldn't fill (either capacity ran out or limit doesn't cross)
+  worstPrice: number | null; // last price level touched — used to flag slippage
+  wouldCross: boolean;    // for a limit: whether the user's price crosses the book
+}
+
+// Walk the relevant side of the book against the requested qty + price and
+// build a fill preview. Market orders consume in price-time priority until
+// either the qty is exhausted or the book is empty. Limit orders only
+// consume levels their price reaches; everything past that point rests.
+//
+// Why this matters: without this preview the ticket math used the static
+// mark price for every market order, so the liquidation row never moved
+// with size — it only changed when leverage changed. That looks broken
+// even though the underlying liq formula is correct. The fix is to feed
+// liq the realistic average fill price, which DOES move with size as soon
+// as the order is large enough to sweep multiple levels.
+function previewFill(args: {
+  side: Side;
+  type: OrderTypeUi;
+  qty: number;
+  priceInput: string;
+  book: import("@/lib/types/contract").OrderbookSnapshot | undefined;
+  markPx: number | null;
+}): FillPreview {
+  const { side, type, qty, priceInput, book, markPx } = args;
+  const limitPx = type === "limit" ? Number(priceInput) : NaN;
+  const fallback: FillPreview = {
+    effPrice: type === "market" ? markPx ?? 0 : Number.isFinite(limitPx) ? limitPx : 0,
+    filledQty: 0,
+    remaining: qty,
+    worstPrice: null,
+    wouldCross: false,
+  };
+  if (qty <= 0 || !book) return fallback;
+
+  // Taker buys eat asks (ascending). Takers sells eat bids (descending).
+  // OrderbookSnapshot is already sorted that way by the edge.
+  const levels = side === "buy" ? book.asks : book.bids;
+  if (!levels || levels.length === 0) return fallback;
+
+  let remaining = qty;
+  let notional = 0;
+  let filled = 0;
+  let worst: number | null = null;
+  let crossedAny = false;
+
+  for (const [pxStr, qtyStr] of levels) {
+    if (remaining <= 0) break;
+    const lvlPx = Number(pxStr);
+    const lvlQty = Number(qtyStr);
+    if (!Number.isFinite(lvlPx) || !Number.isFinite(lvlQty) || lvlQty <= 0) continue;
+
+    // Limit orders only consume levels their price reaches.
+    if (type === "limit") {
+      if (!Number.isFinite(limitPx)) break;
+      if (side === "buy" && lvlPx > limitPx) break;
+      if (side === "sell" && lvlPx < limitPx) break;
+      crossedAny = true;
+    }
+
+    const take = Math.min(remaining, lvlQty);
+    notional += take * lvlPx;
+    filled += take;
+    remaining -= take;
+    worst = lvlPx;
+  }
+
+  // Limit didn't cross anything → rests on the book at the user's price.
+  if (type === "limit" && !crossedAny) {
+    return {
+      effPrice: Number.isFinite(limitPx) ? limitPx : 0,
+      filledQty: 0,
+      remaining: qty,
+      worstPrice: null,
+      wouldCross: false,
+    };
+  }
+
+  // Nothing crossed at all (e.g. market order against an empty book).
+  if (filled <= 0) {
+    return {
+      effPrice: type === "limit" && Number.isFinite(limitPx) ? limitPx : markPx ?? 0,
+      filledQty: 0,
+      remaining: qty,
+      worstPrice: null,
+      wouldCross: crossedAny,
+    };
+  }
+
+  const vwap = notional / filled;
+  return {
+    effPrice: vwap,
+    filledQty: filled,
+    remaining,
+    worstPrice: worst,
+    wouldCross: crossedAny,
+  };
 }
