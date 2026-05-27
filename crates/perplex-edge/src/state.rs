@@ -69,6 +69,10 @@ struct Inner {
     pub jwt_secret: Vec<u8>,
     /// Funding history keyed by marketId.
     funding_history: RwLock<HashMap<String, Vec<(u64, f64)>>>,
+    /// Live index prices keyed by marketId, x18-scaled decimal strings. Populated
+    /// by the oracle relayer when one is running; otherwise the static seed values
+    /// in `markets` are returned by `market()` / `list_markets()`. Read-mostly path.
+    oracle_prices: RwLock<HashMap<String, String>>,
     /// When true, auth handlers seed a fresh wallet with 100k USDC the first
     /// time they mint a JWT. Off in production — deposits must flow through
     /// the on-chain vault path — but on locally so traders can place orders
@@ -110,6 +114,7 @@ impl AppState {
                 siwe_nonces: RwLock::new(HashMap::new()),
                 jwt_secret,
                 funding_history: RwLock::new(HashMap::new()),
+                oracle_prices: RwLock::new(HashMap::new()),
                 dev_seed_vault,
             }),
         }
@@ -132,13 +137,40 @@ impl AppState {
     }
 
     pub fn list_markets(&self) -> Vec<MarketInfo> {
-        let mut v: Vec<_> = self.inner.markets.values().cloned().collect();
+        let live = self.inner.oracle_prices.read();
+        let mut v: Vec<MarketInfo> = self
+            .inner
+            .markets
+            .values()
+            .cloned()
+            .map(|mut m| {
+                if let Some(px) = live.get(&m.id) {
+                    m.index_price_x18 = px.clone();
+                }
+                m
+            })
+            .collect();
         v.sort_by(|a, b| a.id.cmp(&b.id));
         v
     }
 
     pub fn market(&self, market_id: &str) -> Option<MarketInfo> {
-        self.inner.markets.get(market_id).cloned()
+        let mut m = self.inner.markets.get(market_id).cloned()?;
+        if let Some(px) = self.inner.oracle_prices.read().get(market_id) {
+            m.index_price_x18 = px.clone();
+        }
+        Some(m)
+    }
+
+    /// Push a fresh index price for `market_id`. Subsequent calls to `market()`
+    /// and `list_markets()` see the new value. Position aggregates and the
+    /// `oracle.{marketId}` WS channel pick it up on the next tick. Caller is
+    /// responsible for formatting `price_x18` as a 1e18-scaled decimal string.
+    pub fn set_oracle_price(&self, market_id: &str, price_x18: String) {
+        self.inner
+            .oracle_prices
+            .write()
+            .insert(market_id.to_string(), price_x18);
     }
 
     pub fn orderbook(&self, market_id: &str) -> Option<BookSnapshot> {

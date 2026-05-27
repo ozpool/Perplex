@@ -22,6 +22,10 @@ export function MarketHeader({ marketId, market }: Props) {
   const oraclePx = oracle ? x18ToDollars(oracle.priceX18) : NaN;
   const indexPx = market ? x18ToDollars(market.indexPriceX18) : NaN;
   const cur = Number.isFinite(oraclePx) ? oraclePx : indexPx;
+  // Source pill shows whether the visible price is a live Pyth tick (oracle
+  // WS frame seen this market) or the static seed value. Investors asked for
+  // a visual cue so the "is this real" question has an immediate answer.
+  const live = oracle !== null;
 
   // Track open-of-day price to compute 24h change. Anchor off whichever
   // source first lands a finite price so the percentage isn't 0 on cold load.
@@ -67,7 +71,10 @@ export function MarketHeader({ marketId, market }: Props) {
       </div>
       <div className="flex items-stretch gap-2 pl-2 pr-3 sm:pr-5 overflow-x-auto flex-1 min-w-0">
         <Stat label="Oracle">
-          <NumberDisplay value={cur} decimals={priceDecimals(market)} size="lg" className="text-fg" prefix="$" />
+          <div className="flex items-baseline gap-2">
+            <NumberDisplay value={cur} decimals={priceDecimals(market)} size="lg" className="text-fg" prefix="$" />
+            <SourcePill live={live} />
+          </div>
         </Stat>
 
         <Stat label="24h change">
@@ -113,6 +120,34 @@ export function MarketHeader({ marketId, market }: Props) {
         </Stat>
       </div>
     </div>
+  );
+}
+
+function SourcePill({ live }: { live: boolean }) {
+  // Green dot + "Pyth" when the relayer is alive and a WS oracle frame has
+  // landed for this market; muted "static" when we're showing the seed price.
+  return (
+    <span
+      title={
+        live
+          ? "Live Pyth Hermes price — updates every ~500ms"
+          : "Static seed price — oracle relayer not running"
+      }
+      className={cn(
+        "inline-flex items-center gap-1 px-1.5 h-4 rounded-[var(--radius-xs)] font-mono text-[9px] uppercase tracking-wider border",
+        live
+          ? "bg-long-soft text-long border-[color-mix(in_oklab,var(--long),transparent_55%)]"
+          : "bg-bg-2 text-fg-muted border-border"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block size-1.5 rounded-full",
+          live ? "bg-long animate-pulse" : "bg-fg-muted"
+        )}
+      />
+      {live ? "Pyth" : "static"}
+    </span>
   );
 }
 
