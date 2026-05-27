@@ -361,7 +361,7 @@ export function OrderForm({ marketId, market, freeCollateralUsdc }: Props) {
             label={`Liquidation @ ${leverage}x`}
             value={liqEst !== null ? `$${commaFmt(liqEst, tickDec)}` : "—"}
             highlight={liqEst !== null ? "warn" : undefined}
-            help={`Liq. price is a function of entry price, leverage and side — it does not depend on size. Move the leverage slider to see it shift. Current entry assumption: $${commaFmt(effPrice, tickDec)} (${side}).`}
+            help={`Liq. price = entry × (1 − 1/leverage + maint. margin) for longs (inverse for shorts). Entry is the volume-weighted fill price, so larger sizes that walk the book widen slippage and shift liq. Move leverage to see it shift further. Current entry: $${commaFmt(effPrice, tickDec)} (${side}).`}
           />
           <Row label="Free collateral" value={free !== null ? `$${commaFmt(free, 2)}` : "—"} muted />
         </div>
