@@ -23,6 +23,14 @@ export interface Market {
   makerRebateBps: number;
   fundingIntervalSec: number;
   indexPriceX18: string;
+  /** Rolling 24h quote volume in USDC (6-decimal raw). "0" until trades exist. */
+  volume24hUsdc?: string;
+  /** Cross-account open interest in USDC (6-decimal raw). "0" with no positions. */
+  openInterestUsdc?: string;
+  /** Live funding rate in bps, signed. 0 with no book or no index price. */
+  fundingRateBps?: number;
+  /** Nanoseconds since Unix epoch of the next funding settlement boundary. */
+  nextFundingTsNs?: string;
 }
 
 export interface MarketsResponse {

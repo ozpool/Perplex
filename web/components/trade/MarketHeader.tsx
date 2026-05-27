@@ -4,7 +4,7 @@ import type { Market, MarketId } from "@/lib/types/contract";
 import { useLiveOracle, useLiveFunding } from "@/lib/ws/channels";
 import { MarketSwitcher } from "@/components/layout/MarketSwitcher";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
-import { formatCountdown, x18ToDollars } from "@/lib/format/number";
+import { formatCountdown, usdc6ToDollars, x18ToDollars } from "@/lib/format/number";
 import { cn } from "@/lib/cn";
 
 interface Props {
@@ -22,6 +22,10 @@ export function MarketHeader({ marketId, market }: Props) {
   const oraclePx = oracle ? x18ToDollars(oracle.priceX18) : NaN;
   const indexPx = market ? x18ToDollars(market.indexPriceX18) : NaN;
   const cur = Number.isFinite(oraclePx) ? oraclePx : indexPx;
+  // Source pill shows whether the visible price is a live Pyth tick (oracle
+  // WS frame seen this market) or the static seed value. Investors asked for
+  // a visual cue so the "is this real" question has an immediate answer.
+  const live = oracle !== null;
 
   // Track open-of-day price to compute 24h change. Anchor off whichever
   // source first lands a finite price so the percentage isn't 0 on cold load.
@@ -31,34 +35,34 @@ export function MarketHeader({ marketId, market }: Props) {
     setOpenPrice(cur * (0.98 + (seed / 40) * 0.04));
   }
 
-  // Countdown ticker + fallback next-hour. We bump a `_` state once per
-  // second so formatCountdown below re-renders, and recompute the next-hour
-  // anchor inside the interval (calling Date.now() in render would violate
-  // react-hooks/purity).
-  const [synthNextFundingTsNs, setSynthNextFundingTsNs] = useState<string>(
-    () => `${BigInt(Math.ceil(Date.now() / 3_600_000) * 3_600_000) * 1_000_000n}`
-  );
+  // Countdown ticker. Bump a hidden state once per second so formatCountdown
+  // below re-renders against the (server-provided) next-funding boundary.
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => {
-      setTick((t) => t + 1);
-      const ms = Math.ceil(Date.now() / 3_600_000) * 3_600_000;
-      const next = `${BigInt(ms) * 1_000_000n}`;
-      setSynthNextFundingTsNs((prev) => (prev === next ? prev : next));
-    }, 1000);
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
   const change = openPrice && Number.isFinite(cur) ? ((cur - openPrice) / openPrice) * 100 : 0;
   const changeAbs = openPrice && Number.isFinite(cur) ? cur - openPrice : 0;
 
-  // Synth a stable funding rate per market when the funding leader is silent
-  // so the stat doesn't read 0.0000% — clearly bounded (-2bps..+2bps).
-  const synthFundingBps = ((hashMarket(marketId) % 41) - 20) / 10;
-  const fundingBps = funding?.currentRateBps ?? synthFundingBps;
+  // Funding rate comes from the WS funding.{marketId} channel when the edge
+  // ticker is alive; otherwise fall back to the value the REST /v1/markets
+  // payload includes (computed at read time from book mid vs index). Both
+  // paths are real — no more per-market hash synth.
+  const fundingBps = funding?.currentRateBps ?? market?.fundingRateBps ?? 0;
   const fundingClass = fundingBps >= 0 ? "text-long" : "text-short";
 
-  const nextFundingTsNs = funding?.nextSettlementTsNs ?? synthNextFundingTsNs;
+  // Next-funding timestamp is now authoritative on the server side (aligned
+  // to fundingIntervalSec), so prefer WS, then REST. Both render the same
+  // value until the boundary passes.
+  const nextFundingTsNs =
+    funding?.nextSettlementTsNs ?? market?.nextFundingTsNs ?? "0";
+
+  // 24h volume and open interest are computed on the edge and shipped with
+  // every /v1/markets call. usdc6ToDollars handles the 6-decimal scaling.
+  const volume24h = market?.volume24hUsdc ? usdc6ToDollars(market.volume24hUsdc) : 0;
+  const openInterest = market?.openInterestUsdc ? usdc6ToDollars(market.openInterestUsdc) : 0;
 
   return (
     <div className="border-b border-border bg-bg-1 flex items-stretch">
@@ -67,7 +71,10 @@ export function MarketHeader({ marketId, market }: Props) {
       </div>
       <div className="flex items-stretch gap-2 pl-2 pr-3 sm:pr-5 overflow-x-auto flex-1 min-w-0">
         <Stat label="Oracle">
-          <NumberDisplay value={cur} decimals={priceDecimals(market)} size="lg" className="text-fg" prefix="$" />
+          <div className="flex items-baseline gap-2">
+            <NumberDisplay value={cur} decimals={priceDecimals(market)} size="lg" className="text-fg" prefix="$" />
+            <SourcePill live={live} />
+          </div>
         </Stat>
 
         <Stat label="24h change">
@@ -85,11 +92,11 @@ export function MarketHeader({ marketId, market }: Props) {
         </Stat>
 
         <Stat label="24h volume">
-          <NumberDisplay value={fakeVolume(marketId, cur)} decimals={2} size="sm" prefix="$" />
+          <NumberDisplay value={volume24h} decimals={2} size="sm" prefix="$" />
         </Stat>
 
         <Stat label="Open interest">
-          <NumberDisplay value={fakeOI(marketId, cur)} decimals={2} size="sm" prefix="$" />
+          <NumberDisplay value={openInterest} decimals={2} size="sm" prefix="$" />
         </Stat>
 
         <Stat label="Funding (1h)">
@@ -116,6 +123,34 @@ export function MarketHeader({ marketId, market }: Props) {
   );
 }
 
+function SourcePill({ live }: { live: boolean }) {
+  // Green dot + "Pyth" when the relayer is alive and a WS oracle frame has
+  // landed for this market; muted "static" when we're showing the seed price.
+  return (
+    <span
+      title={
+        live
+          ? "Live Pyth Hermes price — updates every ~500ms"
+          : "Static seed price — oracle relayer not running"
+      }
+      className={cn(
+        "inline-flex items-center gap-1 px-1.5 h-4 rounded-[var(--radius-xs)] font-mono text-[9px] uppercase tracking-wider border",
+        live
+          ? "bg-long-soft text-long border-[color-mix(in_oklab,var(--long),transparent_55%)]"
+          : "bg-bg-2 text-fg-muted border-border"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block size-1.5 rounded-full",
+          live ? "bg-long animate-pulse" : "bg-fg-muted"
+        )}
+      />
+      {live ? "Pyth" : "static"}
+    </span>
+  );
+}
+
 function Stat({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col justify-center py-2 px-3 min-w-[7rem] whitespace-nowrap">
@@ -132,18 +167,3 @@ function priceDecimals(market: Market | undefined): number {
   return Math.max(2, market.tickSize.length - i - 1);
 }
 
-function hashMarket(m: MarketId): number {
-  let h = 0;
-  for (const c of m) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return h;
-}
-
-function fakeVolume(m: MarketId, price: number): number {
-  const base = m === "btc-usd" ? 2_400 : m === "eth-usd" ? 18_000 : 200_000;
-  return Number.isFinite(price) ? price * base * (0.9 + Math.sin(Date.now() / 30000) * 0.05) : 0;
-}
-
-function fakeOI(m: MarketId, price: number): number {
-  const base = m === "btc-usd" ? 900 : m === "eth-usd" ? 6_000 : 80_000;
-  return Number.isFinite(price) ? price * base : 0;
-}

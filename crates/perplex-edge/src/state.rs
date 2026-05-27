@@ -69,6 +69,10 @@ struct Inner {
     pub jwt_secret: Vec<u8>,
     /// Funding history keyed by marketId.
     funding_history: RwLock<HashMap<String, Vec<(u64, f64)>>>,
+    /// Live index prices keyed by marketId, x18-scaled decimal strings. Populated
+    /// by the oracle relayer when one is running; otherwise the static seed values
+    /// in `markets` are returned by `market()` / `list_markets()`. Read-mostly path.
+    oracle_prices: RwLock<HashMap<String, String>>,
     /// When true, auth handlers seed a fresh wallet with 100k USDC the first
     /// time they mint a JWT. Off in production — deposits must flow through
     /// the on-chain vault path — but on locally so traders can place orders
@@ -110,6 +114,7 @@ impl AppState {
                 siwe_nonces: RwLock::new(HashMap::new()),
                 jwt_secret,
                 funding_history: RwLock::new(HashMap::new()),
+                oracle_prices: RwLock::new(HashMap::new()),
                 dev_seed_vault,
             }),
         }
@@ -132,13 +137,146 @@ impl AppState {
     }
 
     pub fn list_markets(&self) -> Vec<MarketInfo> {
-        let mut v: Vec<_> = self.inner.markets.values().cloned().collect();
+        let mut v: Vec<MarketInfo> = self
+            .inner
+            .markets
+            .values()
+            .cloned()
+            .map(|m| self.decorate_market(m))
+            .collect();
         v.sort_by(|a, b| a.id.cmp(&b.id));
         v
     }
 
     pub fn market(&self, market_id: &str) -> Option<MarketInfo> {
+        let m = self.inner.markets.get(market_id).cloned()?;
+        Some(self.decorate_market(m))
+    }
+
+    /// Overlay live oracle price + computed stats (24h volume, open interest,
+    /// funding rate, next funding boundary) onto a static MarketInfo. Called
+    /// from `market()` / `list_markets()` so REST callers always see the
+    /// freshest numbers without any cache invalidation.
+    fn decorate_market(&self, mut m: MarketInfo) -> MarketInfo {
+        if let Some(px) = self.inner.oracle_prices.read().get(&m.id) {
+            m.index_price_x18 = px.clone();
+        }
+        m.volume_24h_usdc = self.volume_24h_usdc(&m.id);
+        m.open_interest_usdc = self.open_interest_usdc(&m.id);
+        m.funding_rate_bps = self.funding_rate_bps(&m.id);
+        m.next_funding_ts_ns = next_funding_ts_ns(m.funding_interval_sec as u64);
+        m
+    }
+
+    /// Sum |qty * price| over every public trade currently retained for this
+    /// market. The trade ring is bounded so this is constant-time per market,
+    /// not a true 24h scan — accurate enough for the demo dashboard until a
+    /// dedicated aggregator ships.
+    pub fn volume_24h_usdc(&self, market_id: &str) -> String {
+        let trades = self.inner.public_trades.read();
+        let Some(list) = trades.get(market_id) else {
+            return "0".to_string();
+        };
+        let mut total = Decimal::ZERO;
+        for t in list.iter() {
+            let qty: Decimal = t.qty.parse().unwrap_or_default();
+            let price: Decimal = t.price.parse().unwrap_or_default();
+            total += (qty * price).abs();
+        }
+        scale_usdc6(total)
+    }
+
+    /// Open interest = sum of |size * mark| across every user's open position
+    /// in this market. Mark price tracks the (overlaid) index price so OI
+    /// drifts with the oracle. Returned as 6-decimal USDC raw to match the
+    /// rest of the wire format.
+    pub fn open_interest_usdc(&self, market_id: &str) -> String {
+        let mark = self
+            .market_raw(market_id)
+            .map(|m| unscale_x18(&m.index_price_x18))
+            .unwrap_or_default();
+        // Re-apply oracle overlay so OI tracks live price.
+        let mark = self
+            .inner
+            .oracle_prices
+            .read()
+            .get(market_id)
+            .map(|p| unscale_x18(p))
+            .unwrap_or(mark);
+        if mark.is_zero() {
+            return "0".to_string();
+        }
+        let positions = self.inner.positions.read();
+        let mut total = Decimal::ZERO;
+        for list in positions.values() {
+            for p in list.iter() {
+                if p.market_id != market_id {
+                    continue;
+                }
+                let size: Decimal = p.size.parse().unwrap_or_default();
+                total += (size * mark).abs();
+            }
+        }
+        scale_usdc6(total)
+    }
+
+    /// Funding rate in bps derived from the orderbook mid versus the live
+    /// index price: ((mid - index) / index) × 10000. Positive means longs pay
+    /// shorts (book trading above index), negative the reverse. Clamped to
+    /// ±100 bps so a thin book can't produce wild numbers. Falls back to 0
+    /// when either side of the book is empty or the index isn't known.
+    pub fn funding_rate_bps(&self, market_id: &str) -> i32 {
+        let Some(m) = self.market_raw(market_id) else {
+            return 0;
+        };
+        let index = self
+            .inner
+            .oracle_prices
+            .read()
+            .get(market_id)
+            .map(|p| unscale_x18(p))
+            .unwrap_or_else(|| unscale_x18(&m.index_price_x18));
+        if index.is_zero() {
+            return 0;
+        }
+        let books = self.inner.orderbooks.read();
+        let Some(book) = books.get(market_id) else {
+            return 0;
+        };
+        let best_bid = book
+            .bids
+            .first()
+            .and_then(|lvl| lvl[0].parse::<Decimal>().ok());
+        let best_ask = book
+            .asks
+            .first()
+            .and_then(|lvl| lvl[0].parse::<Decimal>().ok());
+        let (Some(bid), Some(ask)) = (best_bid, best_ask) else {
+            return 0;
+        };
+        let mid = (bid + ask) / Decimal::from(2u32);
+        let drift = (mid - index) / index * Decimal::from(10_000u32);
+        use rust_decimal::prelude::ToPrimitive;
+        let raw = drift.round().to_i32().unwrap_or(0);
+        raw.clamp(-100, 100)
+    }
+
+    /// Internal accessor that returns the raw stored MarketInfo without any
+    /// of the decorate_market overlays — used inside decorate_market itself
+    /// to avoid infinite recursion when computing OI / funding.
+    fn market_raw(&self, market_id: &str) -> Option<MarketInfo> {
         self.inner.markets.get(market_id).cloned()
+    }
+
+    /// Push a fresh index price for `market_id`. Subsequent calls to `market()`
+    /// and `list_markets()` see the new value. Position aggregates and the
+    /// `oracle.{marketId}` WS channel pick it up on the next tick. Caller is
+    /// responsible for formatting `price_x18` as a 1e18-scaled decimal string.
+    pub fn set_oracle_price(&self, market_id: &str, price_x18: String) {
+        self.inner
+            .oracle_prices
+            .write()
+            .insert(market_id.to_string(), price_x18);
     }
 
     pub fn orderbook(&self, market_id: &str) -> Option<BookSnapshot> {
@@ -715,6 +853,22 @@ pub fn now_ns() -> u64 {
         .as_nanos() as u64
 }
 
+/// Next funding settlement boundary as nanoseconds since the Unix epoch.
+/// Aligned to `interval_sec` so the FE countdown is stable across reads
+/// — e.g. with 28800s (8h) settlements the value advances only at 00:00,
+/// 08:00, 16:00 UTC.
+pub fn next_funding_ts_ns(interval_sec: u64) -> String {
+    if interval_sec == 0 {
+        return "0".to_string();
+    }
+    let now_sec = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let next_sec = ((now_sec / interval_sec) + 1) * interval_sec;
+    ((next_sec as u128) * 1_000_000_000u128).to_string()
+}
+
 fn default_markets() -> HashMap<String, MarketInfo> {
     let mut m = HashMap::new();
     m.insert(
@@ -734,6 +888,10 @@ fn default_markets() -> HashMap<String, MarketInfo> {
             maker_rebate_bps: -2,
             funding_interval_sec: 28_800,
             index_price_x18: "100000000000000000000000".into(),
+            volume_24h_usdc: "0".into(),
+            open_interest_usdc: "0".into(),
+            funding_rate_bps: 0,
+            next_funding_ts_ns: "0".into(),
         },
     );
     m.insert(
@@ -753,6 +911,10 @@ fn default_markets() -> HashMap<String, MarketInfo> {
             maker_rebate_bps: -2,
             funding_interval_sec: 28_800,
             index_price_x18: "3500000000000000000000".into(),
+            volume_24h_usdc: "0".into(),
+            open_interest_usdc: "0".into(),
+            funding_rate_bps: 0,
+            next_funding_ts_ns: "0".into(),
         },
     );
     m.insert(
@@ -775,6 +937,10 @@ fn default_markets() -> HashMap<String, MarketInfo> {
             // so the edge default agrees with the on-chain oracle on a fresh `make dev-up`.
             // Bumped from 150e18; see #95.
             index_price_x18: "200000000000000000000".into(),
+            volume_24h_usdc: "0".into(),
+            open_interest_usdc: "0".into(),
+            funding_rate_bps: 0,
+            next_funding_ts_ns: "0".into(),
         },
     );
     m

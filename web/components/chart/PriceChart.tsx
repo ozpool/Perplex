@@ -2,6 +2,7 @@
 import { useEffect, useRef } from "react";
 import type { MarketId } from "@/lib/types/contract";
 import { useLiveOracle } from "@/lib/ws/channels";
+import { x18ToDollars } from "@/lib/format/number";
 import {
   createChart,
   CandlestickSeries,
@@ -138,8 +139,11 @@ export function PriceChart({ marketId, anchor }: Props) {
   // Apply oracle ticks
   useEffect(() => {
     if (!oracle || !candleSeriesRef.current) return;
-    const px = Number(oracle.priceX18);
-    if (!Number.isFinite(px)) return;
+    // priceX18 is the 1e18-scaled integer wire format (e.g. "75058611316720000000000").
+    // lightweight-charts rejects values > 9e13, so convert to dollars before
+    // feeding it into the candle series.
+    const px = x18ToDollars(oracle.priceX18);
+    if (!Number.isFinite(px) || px <= 0) return;
     const nowSec = Math.floor(Date.now() / 1000);
     const bucketStart = (Math.floor(nowSec / TF_SECONDS) * TF_SECONDS) as UTCTimestamp;
 

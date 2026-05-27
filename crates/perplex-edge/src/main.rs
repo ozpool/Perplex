@@ -1,6 +1,10 @@
 use std::net::SocketAddr;
 
 use clap::Parser;
+use std::time::Duration;
+
+use perplex_edge::market_stats::spawn_market_stats_ticker;
+use perplex_edge::oracle::{default_feeds, spawn_pyth_relayer};
 use perplex_edge::ws::{serve_ws, Hub, WsConfig};
 use perplex_edge::{build_router, build_router_with_dev_token, AppState};
 use tracing_subscriber::EnvFilter;
@@ -25,6 +29,13 @@ struct Args {
     /// `--dev-routes=true|false` or `PERPLEX_DEV_ROUTES=1|0`.
     #[arg(long, env = "PERPLEX_DEV_ROUTES", default_value_t = cfg!(debug_assertions))]
     dev_routes: bool,
+
+    /// Spawn the Pyth Hermes oracle relayer in-process. Pulls live BTC/ETH/SOL
+    /// prices every ~500ms and pushes them into AppState + the WS hub. On by
+    /// default; flip off with `--with-oracle=false` to fall back to the static
+    /// seed prices (useful for deterministic tests or when Hermes is down).
+    #[arg(long, env = "PERPLEX_WITH_ORACLE", default_value_t = true)]
+    with_oracle: bool,
 }
 
 #[tokio::main]
@@ -57,6 +68,16 @@ async fn main() -> anyhow::Result<()> {
     } else {
         build_router(state.clone())
     };
+
+    if args.with_oracle {
+        spawn_pyth_relayer(state.clone(), hub.clone(), default_feeds());
+    } else {
+        tracing::info!("oracle relayer disabled by flag; markets use static seed prices");
+    }
+    // Funding/next-funding broadcaster. Cheap to run regardless of relayer
+    // status — volume + OI fall out of REST reads, this just makes the FE
+    // funding pill move without a poll.
+    spawn_market_stats_ticker(state.clone(), hub.clone(), Duration::from_secs(2));
 
     let ws_addr: SocketAddr = args.ws_bind.parse()?;
     let _ws_handle = serve_ws(state, hub, WsConfig { bind: ws_addr }).await?;

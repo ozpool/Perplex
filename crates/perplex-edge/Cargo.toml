@@ -9,6 +9,8 @@ default-run = "perplex-edge"
 [dependencies]
 perplex-core = { path = "../perplex-core" }
 perplex-matching = { path = "../perplex-matching" }
+perplex-oracle = { path = "../perplex-oracle" }
+reqwest = { workspace = true }
 async-trait = "0.1"
 axum = { workspace = true }
 futures-util = "0.3"
@@ -37,7 +39,6 @@ uuid = { workspace = true }
 clap = { workspace = true }
 
 [dev-dependencies]
-reqwest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
 tokio-tungstenite = { workspace = true }
 futures-util = "0.3"
