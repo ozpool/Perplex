@@ -19,7 +19,7 @@ use perplex_oracle::{
 };
 use rust_decimal::Decimal;
 use serde_json::json;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::state::{now_ns, AppState};
 use crate::ws::{Hub, Message, Topic};
@@ -33,22 +33,21 @@ pub struct FeedBinding {
 
 /// Defaults: BTC/USD, ETH/USD, SOL/USD on Pyth mainnet feed ids. These ids
 /// are stable across Pyth deployments and listed in their public registry.
+/// Stored *without* a leading 0x because Hermes' `parsed[].id` returns the
+/// hex without one — and `feed_to_market` lookups compare against that.
 pub fn default_feeds() -> Vec<FeedBinding> {
     vec![
         FeedBinding {
             market_id: "btc-usd".into(),
-            feed_id: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"
-                .into(),
+            feed_id: "e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43".into(),
         },
         FeedBinding {
             market_id: "eth-usd".into(),
-            feed_id: "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
-                .into(),
+            feed_id: "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace".into(),
         },
         FeedBinding {
             market_id: "sol-usd".into(),
-            feed_id: "0xef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
-                .into(),
+            feed_id: "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d".into(),
         },
     ]
 }
@@ -68,6 +67,12 @@ impl Submitter for EdgeSubmitter {
                 continue;
             };
             let price_x18 = scale_decimal_to_x18(s.price_x18);
+            debug!(
+                market = %market_id,
+                price = %s.price_x18,
+                price_x18 = %price_x18,
+                "oracle submit"
+            );
             self.state
                 .set_oracle_price(market_id, price_x18.clone());
 

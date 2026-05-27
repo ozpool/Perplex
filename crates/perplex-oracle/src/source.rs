@@ -101,25 +101,33 @@ impl PriceSource for HermesSource {
             )));
         }
 
+        // Hermes returns one merged binary VAA covering every requested feed
+        // (it is the on-chain `updatePriceFeeds` payload), not one per id.
+        // Decode it once and hand the same bytes to every sample; consumers
+        // that need to discriminate per feed parse the VAA themselves. When
+        // the response is missing the binary section entirely (some staging
+        // endpoints), fall back to None so the off-chain consumer still gets
+        // its price.
+        let shared_update: Option<Vec<u8>> = body
+            .binary
+            .data
+            .first()
+            .map(|h| hex_decode(h))
+            .transpose()?;
+
         let mut samples = Vec::with_capacity(feed_ids.len());
-        for (i, p) in body.parsed.iter().enumerate() {
+        for p in body.parsed.iter() {
             let price_i128: i128 = p
                 .price
                 .price
                 .parse()
                 .map_err(|_| OracleError::Schema("price not parseable".into()))?;
             let scaled = scale_to_x18(price_i128, p.price.expo)?;
-            let update_hex = body
-                .binary
-                .data
-                .get(i)
-                .ok_or_else(|| OracleError::Schema("missing binary entry".into()))?;
-            let update_bytes = hex_decode(update_hex)?;
             samples.push(PriceSample {
                 feed_id: p.id.clone(),
                 price_x18: scaled,
                 publish_time_sec: p.price.publish_time,
-                update_data: Some(update_bytes),
+                update_data: shared_update.clone(),
             });
         }
         Ok(samples)
