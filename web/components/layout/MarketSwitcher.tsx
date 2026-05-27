@@ -5,6 +5,7 @@ import type { MarketId } from "@/lib/types/contract";
 import { useMarkets } from "@/lib/api/queries";
 import { useLiveOracle } from "@/lib/ws/channels";
 import { NumberDisplay } from "@/components/ui/NumberDisplay";
+import { x18ToDollars } from "@/lib/format/number";
 import { CoinIcon } from "@/components/markets/CoinIcon";
 import { useUi } from "@/lib/store/ui-store";
 import { cn } from "@/lib/cn";
@@ -100,7 +101,7 @@ function MarketRow({
           <span className="text-[10px] text-fg-muted">Cross-margin</span>
         </div>
       </div>
-      <NumberDisplay value={oracle?.priceX18 ?? null} decimals={2} size="sm" prefix="$" />
+      <NumberDisplay value={oracle ? x18ToDollars(oracle.priceX18) : null} decimals={2} size="sm" prefix="$" />
     </button>
   );
 }

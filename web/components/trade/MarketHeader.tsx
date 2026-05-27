@@ -99,7 +99,7 @@ export function MarketHeader({ marketId, market }: Props) {
           <NumberDisplay value={openInterest} decimals={2} size="sm" prefix="$" />
         </Stat>
 
-        <Stat label="Funding (1h)">
+        <Stat label="Funding (8h)">
           <span className={cn("font-mono text-xs tabular-nums", fundingClass)}>
             {(fundingBps / 100).toFixed(4)}%
           </span>
