@@ -60,7 +60,16 @@ export function usePositions() {
 }
 
 export function useFills(marketId?: MarketId) {
-  return useQuery({ queryKey: qk.fills(marketId), queryFn: () => api.fills({ marketId, limit: 100 }) });
+  return useQuery({
+    queryKey: qk.fills(marketId),
+    queryFn: () => api.fills({ marketId, limit: 100 }),
+    staleTime: 1_000,
+    // Same safety net as usePositions: if the WS account stream lags or the
+    // invalidateQueries in usePlaceOrder.onSuccess is missed (hot reload,
+    // mutation error path), the Fills tab still picks up the latest fill
+    // within 2s. Cheap call — edge serves from in-memory state.
+    refetchInterval: 2_000,
+  });
 }
 
 export function useBalance() {
@@ -74,6 +83,7 @@ export function usePlaceOrder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.openOrders });
       qc.invalidateQueries({ queryKey: qk.positions });
+      qc.invalidateQueries({ queryKey: ["fills"] });
     },
   });
 }
