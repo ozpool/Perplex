@@ -28,8 +28,8 @@ export function TopNav() {
         className="border-b border-border flex items-center gap-4 px-3 sm:px-5 h-[var(--topbar-h)]"
       >
         <Link
-          href="/markets"
-          aria-label="Perplex — go to markets"
+          href="/"
+          aria-label="Perplex — go to landing"
           className="flex items-center gap-2 shrink-0"
         >
           <Logo />
