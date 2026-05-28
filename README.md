@@ -22,7 +22,7 @@ Orderbook-matched. USDC-collateralised. Self-custodial. Built for Arbitrum.
 
 Perplex is a **hybrid perpetual-futures DEX**: an off-chain orderbook matched in Rust for centralised-exchange latency, with every fill settled atomically on-chain in Solidity. Traders keep custody of their USDC; the matching engine never holds funds. The match layer is replaceable — settlement does not trust it.
 
-Three markets ship in v1: `BTC-USD`, `ETH-USD`, `SOL-USD`. Up to 20× leverage, 1h funding cadence, EIP-712 signed batch settlement, Pyth pull-oracle on testnet/mainnet with Chainlink as a sanity bound. A local `MockOracle` and `MockUSDC` make the whole stack runnable on a laptop with `make dev-up`.
+Three markets ship in v1: `BTC-USD`, `ETH-USD`, `SOL-USD`. Up to 20× leverage, 8h funding cadence, EIP-712 signed batch settlement. The off-chain Pyth Hermes relayer streams live BTC/ETH/SOL prices into the edge in **every** environment (local, testnet, mainnet) — on-chain settlement adds the verified Pyth pull-feed + Chainlink sanity bound on top. A local `MockOracle` and `MockUSDC` make the whole stack runnable on a laptop with `make dev-up` (or `./scripts/dev-up-all.sh` for the one-command path).
 
 ---
 
@@ -31,7 +31,11 @@ Three markets ship in v1: `BTC-USD`, `ETH-USD`, `SOL-USD`. Up to 20× leverage, 
 - **Self-custodial trading.** USDC stays in `CollateralVault` until the trader signs an EIP-712 fill that the on-chain settlement engine re-verifies. The matching server cannot move funds.
 - **CEX-grade latency.** Rust + axum + `tokio` matching engine with a per-market `BTreeMap` orderbook. Benchmarks land in the low millions of ops/sec on a single core.
 - **Atomic settlement.** `SettlementEngine` either applies every fill in a batch or reverts the whole batch. No partial fills, no torn state.
-- **Lazy hourly funding.** Cumulative funding index per market. Positions settle their funding obligation on next interaction — O(1) per position, O(1) per window.
+- **Live Pyth-driven marks.** `perplex-oracle` relayer streams BTC/ETH/SOL prices from Pyth Hermes every ~500 ms into edge state. Mark price on every position, the trade page header, the chart's live candle, and the market list all source the same tick. A `Pyth` source pill on the trade header makes the live vs static distinction visible at a glance.
+- **Cross-margin position aggregates.** `/v1/positions` returns total notional, unrealised PnL, used margin, and free collateral computed at read time against the live mark. Funding rate is derived from the orderbook mid vs index and broadcast on `funding.{marketId}` every 2 s.
+- **Slippage-aware order ticket.** Liquidation preview walks the orderbook side for the requested size and uses the volume-weighted entry, so the `Liquidation @ Nx` row moves with both size and leverage — not just leverage.
+- **Self-trade prevention.** The edge matcher skips every maker order keyed to the taker's address. Same wallet can't accidentally cross itself and net to zero.
+- **Lazy 8h funding.** Cumulative funding index per market. Positions settle their funding obligation on next interaction — O(1) per position, O(1) per window. Next-settlement timestamp is aligned to UTC `00:00 / 08:00 / 16:00`.
 - **Liquidation + insurance + ADL.** Underwater positions close at the oracle mark; penalty flows to `InsuranceFund`; auto-deleveraging is the last-resort backstop when the fund is empty.
 - **Real-time UI.** Next.js 16 + React 19 + Wagmi v3 frontend with SIWE login, EIP-712 order signing, live orderbook + fills + mark via WebSocket.
 - **Local-first dev loop.** `make dev-up` boots Anvil + Postgres + Redis, deploys 11 contracts, seeds prices, mints `MockUSDC` — full stack in under a minute.
@@ -48,7 +52,7 @@ Three markets ship in v1: `BTC-USD`, `ETH-USD`, `SOL-USD`. Up to 20× leverage, 
 | Frontend | Next.js 16 (App Router) · React 19 · Wagmi v3 · `viem` · TanStack Query · Zustand · Tailwind v4 · MSW |
 | Infra | Docker Compose · Anvil · Postgres 16 · Redis 7 · Prometheus · Grafana |
 | Auth | SIWE (EIP-4361) · JWT (HS256) · EIP-712 typed-data order signing |
-| Oracles | Pyth Hermes pull-feed (testnet/mainnet) · Chainlink sanity bound · `MockOracle` (local) |
+| Oracles | Pyth Hermes off-chain stream (every environment, ~500ms) · Pyth pull-feed + Chainlink sanity bound on-chain (testnet/mainnet) · `MockOracle` available for deterministic tests |
 | Target chain | Arbitrum One (mainnet) · Arbitrum Sepolia (testnet) · Anvil `chainId 31337` (local) |
 
 ---
@@ -194,54 +198,91 @@ flowchart TD
 
 ## Quickstart
 
-Prereqs — Docker Desktop, Foundry (`foundryup`), Rust 1.82+, Node 20+, pnpm 9.
+Prereqs — Docker Desktop, Foundry (`foundryup`), Rust 1.82+, Node 20+, pnpm 9, `jq`, Python 3.9+ (for `seed-book.py`).
+
+### One-command bring-up (recommended)
 
 ```bash
 git clone https://github.com/ozpool/Perplex.git perplex
 cd perplex
 cp .env.example .env
 pnpm install --frozen-lockfile
-make dev-up
+./scripts/dev-up-all.sh
 ```
 
-`make dev-up` boots Anvil + Postgres + Redis, deploys all 11 contracts, seeds market prices (`BTC=$100k · ETH=$3.5k · SOL=$200`), and mints `MockUSDC` to the test accounts.
+Spawns one Terminal window per long-lived process:
 
-In a second terminal start the edge:
+1. **Anvil + Postgres + Redis** via `make dev-up` (contracts deployed, `MockUSDC` minted, markets seeded).
+2. **perplex-edge** — REST `:8080`, WS `:8081`, with the Pyth Hermes oracle relayer wired in by default. Boot log includes `oracle relayer spawned (Pyth Hermes)`.
+3. **perplex-cli quote** — counterparty bot (currently broken under some startup races; `seed-book.py` covers in step 4).
+4. **scripts/seed-book.py** — Python dev-stub market maker. Pulls live mid from `/v1/markets` (which carries the Pyth-overlaid `indexPriceX18`) and posts a 5-rung ladder per side every 2s.
+5. **Prometheus + Grafana** via `make metrics-up`.
+6. **Next.js frontend** via `pnpm web:dev:real` → `http://localhost:3000`.
+
+The script polls `/v1/orderbook/btc-usd` before printing its summary banner, so a green line `btc-usd book has N ask level(s)` confirms everything came up clean.
+
+**Demo wallet (anvil account #5 — import into MetaMask):**
+
+```
+addr: 0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc
+pk:   0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba
+```
+
+Once SIWE login completes, the edge auto-seeds `100,000 USDC` into your vault (`seed_dev_vault` flag, dev-routes only) so you can place orders immediately — no on-chain deposit needed locally.
+
+### Manual bring-up (advanced)
+
+If you'd rather spawn each piece by hand:
 
 ```bash
-export PERPLEX_JWT_SECRET=$(openssl rand -hex 32)
-export DATABASE_URL=postgres://perplex:perplex@localhost:5432/perplex
-export REDIS_URL=redis://localhost:6379
-export RPC_URL=http://localhost:8545
-export RUST_LOG=info
+# 1. Stack
+make dev-up
 
-cargo run --bin perplex-edge
+# 2. Edge (oracle relayer included by default; pass --with-oracle=false to skip)
+PERPLEX_JWT_SECRET=$(openssl rand -hex 32) \
+  cargo run -p perplex-edge -- --bind 127.0.0.1:8080 --ws-bind 127.0.0.1:8081
 # REST  http://localhost:8080
 # Docs  http://localhost:8080/docs
-```
 
-In a third terminal start the counterparty bot so the orderbook isn't empty:
+# 3. Counterparty (the Python stub — perplex-cli quote replaces it once #157 lands)
+python3 scripts/seed-book.py
 
-```bash
-OP_ADDR=0x9965507D1a55bcC2695C58ba16FB37d819B0A4dc
-TOKEN=$(curl -s http://localhost:8080/__dev/token/$OP_ADDR | sed 's/^Bearer //')
-SIG=0x$(printf '0%.0s' {1..130})
+# 4. Metrics
+make metrics-up
+# Grafana    http://localhost:3001  (admin / admin)
+# Prometheus http://localhost:9090
 
-cargo run -p perplex-cli -- quote \
-  --edge-url http://localhost:8080 \
-  --markets btc-usd,eth-usd,sol-usd \
-  --order-signature $SIG \
-  --token $TOKEN
-```
-
-Then the web UI:
-
-```bash
+# 5. Frontend
 cd web && pnpm dev:real
-# open http://localhost:3000
 ```
 
-Stop the stack with `make dev-down`. Wipe + re-bootstrap with `make dev-reset`. A full step-by-step demo runbook (MetaMask setup, dev wallet import, every terminal) lives in the [Notion playbook](https://www.notion.so/36c9a63078bd81529f74df2de761fdb5).
+### Verifying live oracle
+
+After bring-up, BTC/ETH/SOL on the trade page should tick every ~500 ms and the MarketHeader Oracle stat carries a green pulsing **Pyth** pill. Confirm from the CLI:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/markets \
+  | jq '.markets[] | {id, idx: .indexPriceX18, vol: .volume24hUsdc, oi: .openInterestUsdc, fr: .fundingRateBps}'
+```
+
+Run twice, ~2 s apart — `idx` changes between calls.
+
+### Tear down
+
+```bash
+make dev-down       # stop anvil + postgres + redis (keep volumes)
+make metrics-down   # stop prometheus + grafana
+make dev-reset      # nuke volumes and re-bootstrap
+```
+
+A longer playbook (MetaMask import, dev wallet, every terminal) lives in the [Notion runbook](https://www.notion.so/36c9a63078bd81529f74df2de761fdb5).
+
+### Troubleshooting
+
+- **Position panel empty after a fill** — restart the seeder Terminal so its anvil-#1 maker quotes refresh. Self-trade prevention now blocks fills where taker and maker are the same address; this usually means MetaMask is signing as anvil #1 instead of anvil #5. Re-import the demo wallet pk above.
+- **Order rejected `jwt: ExpiredSignature`** — the edge process rotated its JWT secret (e.g. you Ctrl-C'd and restarted it). The FE auto-clears the stale bearer and prompts SIWE again; just sign once more.
+- **Trade page shows `static` next to Oracle** — the Pyth Hermes fetch is failing. Check the edge Terminal for `oracle source fetch failed` warnings. Re-running `./scripts/dev-up-all.sh` typically resolves it.
+- **`Position panel always empty`** — almost always the self-trade case above. As a sanity check, `curl /v1/orderbook/btc-usd` and confirm both bids and asks have at least one level from `seed-book.py` (anvil account #1, not #5).
 
 ---
 
@@ -353,9 +394,20 @@ REST surface is the source of truth for the frontend — every endpoint is docum
 |---|---|---|
 | `orderbook.{marketId}` | public | snapshot + deltas with sequence |
 | `trades.{marketId}` | public | public fills |
-| `oracle.{marketId}` | public | mark price ticks |
+| `oracle.{marketId}` | public | live Pyth Hermes mark-price ticks (~500ms) |
+| `funding.{marketId}` | public | funding rate (bps) + next-settlement nanos (2s ticker) |
 | `user.fills` | bearer | private fills |
 | `user.positions` | bearer | private position diffs |
+
+Subscribe over the framed `op` protocol:
+
+```json
+{ "op": "auth", "token": "<jwt>" }              // only for bearer channels
+{ "op": "subscribe", "channel": "oracle.btc-usd" }
+{ "op": "unsubscribe", "channel": "oracle.btc-usd" }
+```
+
+The edge publishes every message verbatim — clients filter by `type` (e.g. `oracle`, `funding`, `trade`).
 
 ---
 
