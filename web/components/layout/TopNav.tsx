@@ -27,7 +27,11 @@ export function TopNav() {
       <div
         className="border-b border-border flex items-center gap-4 px-3 sm:px-5 h-[var(--topbar-h)]"
       >
-        <Link href={`/trade/${selectedMarket}`} className="flex items-center gap-2 shrink-0">
+        <Link
+          href="/markets"
+          aria-label="Perplex — go to markets"
+          className="flex items-center gap-2 shrink-0"
+        >
           <Logo />
         </Link>
         <nav className="hidden md:flex items-center gap-1 ml-2" aria-label="Primary">
