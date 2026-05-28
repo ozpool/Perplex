@@ -1,9 +1,15 @@
 {
-  "name": "@perplex/sdk",
+  "name": "@ozpool/perplex-sdk",
   "version": "0.1.0",
   "description": "Typed REST + WebSocket client for the Perplex perpetuals exchange.",
   "license": "BUSL-1.1",
-  "repository": "https://github.com/ozpool/Perplex",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ozpool/Perplex.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://github.com/ozpool/Perplex#readme",
+  "bugs": "https://github.com/ozpool/Perplex/issues",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -16,8 +22,13 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "README.md"
   ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

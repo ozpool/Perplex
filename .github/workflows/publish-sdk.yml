@@ -1,0 +1,54 @@
+name: Publish SDK
+
+# Publishes @ozpool/perplex-sdk to GitHub Packages when a `sdk-v*` tag is
+# pushed (e.g. `git tag sdk-v0.1.0 && git push origin sdk-v0.1.0`) or via
+# manual dispatch. Builds + tests the SDK first; never publishes a tag
+# whose build is red.
+
+on:
+  push:
+    tags:
+      - "sdk-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip the final `npm publish` step"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    name: Build, test, publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@ozpool"
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Publish to GitHub Packages
+        if: ${{ github.event_name == 'push' || inputs.dry_run != true }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
