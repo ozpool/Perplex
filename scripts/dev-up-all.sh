@@ -103,7 +103,7 @@ ok "anvil + postgres + redis up; contracts deployed; wallets + market prices see
 # ----- step 2: perplex-edge in a new window --------------------------------
 step "step 2/6  perplex-edge   (REST :8080, WS :8081)"
 open_term "perplex-edge" \
-"PERPLEX_JWT_SECRET=dev-secret cargo run -p perplex-edge -- --bind 127.0.0.1:8080 --ws-bind 127.0.0.1:8081"
+"PERPLEX_JWT_SECRET=dev-secret DATABASE_URL=postgres://perplex:perplex@localhost:5432/perplex cargo run -p perplex-edge -- --bind 127.0.0.1:8080 --ws-bind 127.0.0.1:8081"
 ok "edge launching in a new Terminal window"
 
 printf "waiting for edge "
