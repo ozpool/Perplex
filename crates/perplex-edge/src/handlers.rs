@@ -201,6 +201,63 @@ pub async fn place_order(
         None => None,
     };
 
+    // --- Risk gate ----------------------------------------------------------
+    // Reject orders that aren't backed by enough collateral, and orders that
+    // would exceed the market's max leverage. reduce_only orders only ever
+    // shrink risk, so they bypass the gate. Without this the book accepts
+    // unbacked positions of any size (a $50M position on $100k of collateral),
+    // which is exactly what point-4 liquidations then had to clean up.
+    if !req.reduce_only {
+        let market = state
+            .market(&req.market_id)
+            .ok_or(ApiError::MarketInactive)?;
+        let usdc = Decimal::from(1_000_000u64);
+        let x18 = Decimal::from_str_exact("1000000000000000000").expect("1e18 parses");
+        // Reference price for the order's notional: the limit price, or the
+        // current index when it's a market order.
+        let ref_price = match taker_price {
+            Some(p) => p,
+            None => {
+                market
+                    .index_price_x18
+                    .parse::<Decimal>()
+                    .unwrap_or_default()
+                    / x18
+            }
+        };
+        let notional = taker_qty * ref_price;
+        let im_ratio = Decimal::from(market.im_ratio_bps as u64) / Decimal::from(10_000u64);
+        let required_im = notional * im_ratio;
+
+        // free_collateral already nets existing positions' used margin + PnL.
+        let summary = state.account_summary(&user.address);
+        let free = summary
+            .free_collateral_usdc
+            .parse::<Decimal>()
+            .unwrap_or_default()
+            / usdc;
+        if required_im > free {
+            return Err(ApiError::InsufficientMargin {
+                free: (free * usdc).trunc().to_string(),
+                required: (required_im * usdc).trunc().to_string(),
+            });
+        }
+
+        // Hard leverage cap: notional must not exceed maxLeverage x collateral.
+        let collateral = summary
+            .collateral_usdc
+            .parse::<Decimal>()
+            .unwrap_or_default()
+            / usdc;
+        let max_notional = Decimal::from(market.max_leverage as u64) * collateral;
+        if notional > max_notional {
+            return Err(ApiError::BadRequest(format!(
+                "order notional {notional} exceeds {}x max leverage (collateral {collateral})",
+                market.max_leverage
+            )));
+        }
+    }
+
     let order_id = format!("ord_{}", ulid::Ulid::new());
     let ts_ns = now_ns().to_string();
 
