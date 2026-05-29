@@ -25,7 +25,10 @@ use crate::ws::{Hub, Message, Topic};
 pub fn spawn_market_stats_ticker(state: AppState, hub: Hub, period: Duration) {
     tokio::spawn(async move {
         let mut tick = interval(period);
-        info!(period_ms = period.as_millis() as u64, "market-stats ticker started");
+        info!(
+            period_ms = period.as_millis() as u64,
+            "market-stats ticker started"
+        );
         loop {
             tick.tick().await;
             let markets = state.list_markets();
@@ -45,4 +48,3 @@ pub fn spawn_market_stats_ticker(state: AppState, hub: Hub, period: Duration) {
         }
     });
 }
-

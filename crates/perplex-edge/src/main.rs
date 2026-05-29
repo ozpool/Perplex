@@ -6,7 +6,7 @@ use std::time::Duration;
 use perplex_edge::market_stats::spawn_market_stats_ticker;
 use perplex_edge::oracle::{default_feeds, spawn_pyth_relayer};
 use perplex_edge::ws::{serve_ws, Hub, WsConfig};
-use perplex_edge::{build_router, build_router_with_dev_token, AppState};
+use perplex_edge::{build_router, build_router_with_dev_token, spawn_writer, AppState, Db};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -56,11 +56,24 @@ async fn main() -> anyhow::Result<()> {
         .jwt_secret
         .unwrap_or_else(|| ulid::Ulid::new().to_string())
         .into_bytes();
-    let state = if args.dev_routes {
-        AppState::new_dev(secret)
-    } else {
-        AppState::new(secret)
-    };
+
+    // Postgres is required: every order/position/fill/balance is mirrored to it
+    // so a restart rehydrates instead of starting empty. Connect, apply the
+    // schema, load the existing state, then route future mutations to the
+    // background writer task. Unit tests bypass this via AppState::new_dev.
+    let db_url = std::env::var("DATABASE_URL").map_err(|_| {
+        anyhow::anyhow!(
+            "DATABASE_URL must be set — Perplex persists all state to Postgres. \
+             Start the bundled Postgres (`docker compose up -d postgres`) or point \
+             DATABASE_URL at your own instance."
+        )
+    })?;
+    let db = Db::connect(&db_url).await?;
+    let snapshot = db.load_snapshot().await?;
+    let (persist_tx, persist_rx) = tokio::sync::mpsc::unbounded_channel();
+    spawn_writer(db, persist_rx);
+    tracing::info!("postgres persistence enabled; state rehydrated from db");
+    let state = AppState::new_persisted(secret, args.dev_routes, snapshot, persist_tx);
     let hub = Hub::new();
     let app = if args.dev_routes {
         tracing::warn!("dev routes enabled: GET /__dev/token/:address is exposed");

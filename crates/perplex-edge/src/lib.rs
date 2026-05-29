@@ -7,6 +7,7 @@
 //! tests can swap them out trivially.
 
 pub mod auth;
+pub mod db;
 pub mod error;
 pub mod handlers;
 pub mod market_stats;
@@ -19,6 +20,7 @@ pub mod state;
 pub mod types;
 pub mod ws;
 
+pub use db::{spawn_writer, Db, DbSnapshot, PersistEvent};
 pub use error::ApiError;
 pub use router::{build_router, build_router_with_dev_token};
 pub use state::AppState;

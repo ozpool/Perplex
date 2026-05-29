@@ -14,9 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use perplex_oracle::{
-    HermesSource, OracleError, PriceSample, Relayer, RelayerConfig, Submitter,
-};
+use perplex_oracle::{HermesSource, OracleError, PriceSample, Relayer, RelayerConfig, Submitter};
 use rust_decimal::Decimal;
 use serde_json::json;
 use tracing::{debug, info};
@@ -73,8 +71,7 @@ impl Submitter for EdgeSubmitter {
                 price_x18 = %price_x18,
                 "oracle submit"
             );
-            self.state
-                .set_oracle_price(market_id, price_x18.clone());
+            self.state.set_oracle_price(market_id, price_x18.clone());
 
             // Fan out to subscribers of oracle.{marketId}. Confidence isn't
             // wired through PriceSample today (production would carry it);
