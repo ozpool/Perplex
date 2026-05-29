@@ -61,22 +61,12 @@ A snapshot of what the platform does today versus what stands between it and a l
 
 | Capability | Why not yet | What it needs |
 |---|---|---|
-| **Run on a public blockchain** | Runs on a local dev chain (Anvil), not a public network. | Deploy contracts to Arbitrum Sepolia. Currently blocked only on obtaining testnet gas tokens from a faucet — minor. |
-| **Handle real money** | Uses test USDC; no real deposits or withdrawals. | A security audit and legal clearance first, then point the vault at real USDC on mainnet. The audit and legal work are the real gatekeepers. |
-| **Be reachable on the internet** | Runs only on a local machine; nothing is hosted. | Paid always-on hosting for the backend + database (see below). |
-| **Pass a security audit** | No external audit; some hardening still pending (per-order EIP-712 verification, oracle-manipulation guards). | Engage an audit firm — costs money and takes weeks; required before real funds. |
-| **Deep, real liquidity** | Only the in-house bot quotes the book. | Recruit external market makers + an incentive program. The fee/rebate rails are already built; this is a business effort, not code. |
-| **Operate legally** | Perpetuals are heavily regulated; no entity, geofencing, or terms in place. | A legal entity in a crypto-friendly jurisdiction, region restrictions, and terms of service. Legal, not code. |
-| **Run 24/7 reliably** | No always-on host, alerting, or backups. | Hosting + monitoring + database backups. Structured logs and Prometheus metrics are already wired; they just need a host to run on. |
-
-### Hosting — why the live deployment costs money
-
-The engineering is done; making it publicly reachable and always-on is a hosting cost, not a code task.
-
-- **Free tiers don't fit a live exchange.** **Render**'s free tier sleeps after ~15 minutes of inactivity — the whole stack stops until the next request wakes it (slow cold starts, dropped live connections). **Fly.io**'s free allowance is too small to keep the backend + database + keeper always-on. **Vercel** (free) hosts only the frontend, so the site loads but shows no data.
-- **Paid, always-on options.** **Railway** (usage-based, ~$5-20/month at this size) runs the backend + Postgres + keeper together and stays awake — best value for a live demo. **Fly.io** (paid, pay-as-you-go) is similarly priced and scales well later.
-
-For a genuinely always-on, shareable URL, expect a modest monthly hosting spend on Railway or Fly.io. Free tiers only suit short, on-demand demos.
+| **Run on a public blockchain** | Runs on a local development chain, not a public network. | Mainnet deployment and testing remains. |
+| **Handle real money** | Uses test USDC; no real deposits or withdrawals. | A proper security audit first, then point the vault at real USDC on mainnet. |
+| **Be reachable on the internet** | Not yet live or hosted. | The application has not yet been deployed to a public host. |
+| **Pass a security audit** | No external audit has been done. | A proper security audit is required before handling real funds. |
+| **Deep, real liquidity** | Only the in-house bot quotes the book. | External market makers + an incentive program. The fee/rebate rails are already built; this is a business effort, not code. |
+| **Operate legally** | Perpetuals are heavily regulated; no entity, geofencing, or terms in place. | A legal entity in a crypto-friendly jurisdiction, region restrictions, and terms of service. |
 
 ---
 
@@ -90,7 +80,7 @@ For a genuinely always-on, shareable URL, expect a modest monthly hosting spend 
 | Infra | Docker Compose · Anvil · Postgres 16 · Redis 7 · Prometheus · Grafana |
 | Auth | SIWE (EIP-4361) · JWT (HS256) · EIP-712 typed-data order signing |
 | Oracles | Pyth Hermes off-chain stream (every environment, ~500ms) · Pyth pull-feed + Chainlink sanity bound on-chain (testnet/mainnet) · `MockOracle` available for deterministic tests |
-| Target chain | Arbitrum One (mainnet) · Arbitrum Sepolia (testnet) · Anvil `chainId 31337` (local) |
+| Target chain | Arbitrum One (mainnet) |
 
 ---
 
@@ -350,33 +340,6 @@ scripts/               seed · smoke-deposit · smoke-trade · smoke-liquidate �
 sdk/                   TypeScript SDK (Phase 5)
 Makefile               Top-level commands
 ```
-
----
-
-## Component status
-
-| Component | Phase | Status |
-|---|---|---|
-| `CollateralVault` | 1 | shipped |
-| `MarketRegistry` | 1 | shipped |
-| `PositionRegistry` (VWAP + health + funding stamp) | 2 | shipped |
-| `SettlementEngine` (EIP-712 batched) | 2 | shipped |
-| Orderbook + per-market workers | 3 | shipped |
-| Differential + invariant tests | 3 | shipped |
-| `OracleAdapter` (Pyth + Chainlink sanity) | 4 | shipped |
-| `FundingEngine` + Rust SETNX cron | 4 | shipped |
-| `LiquidationEngine` + `InsuranceFund` | 4 | shipped |
-| ADL socialisation | 4 | shipped |
-| REST API (11 endpoints + OpenAPI) | 5 | shipped |
-| WebSocket (5 channels, backpressure) | 5 | shipped |
-| Counterparty bot (quote agent + kill switch) | 5 | shipped |
-| SessionKey contract | 5 | shipped |
-| Frontend (Next.js trading UI) | 6 | shipped |
-| Redis token-bucket rate limiting | 6 | shipped |
-| TypeScript SDK + load test | 7 | pending |
-| MegaVault LP backstop | 7 | pending |
-| Arbitrum Sepolia bringup | 8 | pending |
-| External audit + mainnet rollout | 9 | pending |
 
 ---
 
