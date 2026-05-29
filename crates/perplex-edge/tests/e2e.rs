@@ -9,8 +9,34 @@ use reqwest::StatusCode;
 use serde_json::Value;
 
 mod helpers {
+    pub use k256::ecdsa::SigningKey;
+    use k256::ecdsa::VerifyingKey;
+    use sha3::{Digest, Keccak256};
+
     pub fn jwt_secret() -> Vec<u8> {
         b"e2e-test-secret-not-for-prod".to_vec()
+    }
+
+    fn keccak_addr(vk: &VerifyingKey) -> String {
+        let point = vk.to_encoded_point(false);
+        let mut h = Keccak256::new();
+        h.update(&point.as_bytes()[1..]);
+        format!("0x{}", hex::encode(&h.finalize()[12..]))
+    }
+
+    pub fn eth_address(sk: &SigningKey) -> String {
+        keccak_addr(sk.verifying_key())
+    }
+
+    /// Produce an EIP-191 personal_sign signature (`0x` + 65 bytes, v = 27/28).
+    pub fn personal_sign(sk: &SigningKey, msg: &str) -> String {
+        let mut hasher = Keccak256::new();
+        hasher.update(format!("\x19Ethereum Signed Message:\n{}", msg.len()).as_bytes());
+        hasher.update(msg.as_bytes());
+        let (sig, recid) = sk.sign_prehash_recoverable(&hasher.finalize()).unwrap();
+        let mut bytes = sig.to_bytes().to_vec();
+        bytes.push(recid.to_byte() + 27);
+        format!("0x{}", hex::encode(&bytes))
     }
 }
 
@@ -105,10 +131,13 @@ async fn e2e_all_eleven_endpoints() {
     let body: Value = res.json().await.unwrap();
     assert_eq!(body["marketId"], "btc-usd");
 
-    // 1.10 SIWE nonce.
+    // 1.10 SIWE — generate a real keypair, sign the message, and verify. The
+    // verify endpoint now recovers the signer, so a fake signature is rejected.
+    let signer = helpers::SigningKey::from_slice(&[0x42u8; 32]).unwrap();
+    let siwe_addr = helpers::eth_address(&signer);
     let res = client
         .post(format!("{base}/v1/auth/siwe/nonce"))
-        .json(&serde_json::json!({"address": addr}))
+        .json(&serde_json::json!({"address": siwe_addr}))
         .send()
         .await
         .unwrap();
@@ -116,20 +145,32 @@ async fn e2e_all_eleven_endpoints() {
     let body: Value = res.json().await.unwrap();
     let nonce = body["nonce"].as_str().unwrap().to_string();
 
-    // 1.10 SIWE verify — synthesise a dev message that round-trips the nonce.
-    let dev_msg = format!(
-        "perplex.local wants you to sign in\nAddress: {addr}\nNonce: {nonce}\nIssued At: 2026-05-20T12:00:00Z"
+    let siwe_msg = format!(
+        "perplex.local wants you to sign in\nAddress: {siwe_addr}\nNonce: {nonce}\nIssued At: 2026-05-20T12:00:00Z"
     );
-    let dev_sig = "0x".to_string() + &"00".repeat(65);
+    let siwe_sig = helpers::personal_sign(&signer, &siwe_msg);
     let res = client
         .post(format!("{base}/v1/auth/siwe/verify"))
-        .json(&serde_json::json!({"message": dev_msg, "signature": dev_sig}))
+        .json(&serde_json::json!({"message": siwe_msg, "signature": siwe_sig}))
         .send()
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK, "1.10 verify");
     let body: Value = res.json().await.unwrap();
     assert!(!body["jwt"].as_str().unwrap().is_empty());
+
+    // A forged signature for the same message must be rejected.
+    let res = client
+        .post(format!("{base}/v1/auth/siwe/verify"))
+        .json(&serde_json::json!({"message": siwe_msg, "signature": "0x".to_string() + &"00".repeat(65)}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::UNAUTHORIZED,
+        "forged siwe rejected"
+    );
 
     // 1.5 place order — authed.
     let order_req = serde_json::json!({
