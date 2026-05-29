@@ -2,13 +2,14 @@
 //! Numeric values cross the wire as decimal strings (never floats) per section 0 of the contract.
 
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::auth::{issue_jwt, verify_siwe, AuthedUser};
 use crate::error::ApiError;
-use crate::state::{now_ns, AppState};
+use crate::state::{now_ns, AppState, LiquidatablePosition, LiquidationOutcome};
 use crate::types::*;
 
 const MAX_TRADES: usize = 1000;
@@ -454,6 +455,63 @@ pub async fn get_balance(
         pending_deposits: vec![],
         pending_withdrawals: vec![],
     }))
+}
+
+// -- admin: liquidation keeper surface --------------------------------------
+//
+// These two routes are the off-chain liquidation keeper's interface. They are
+// gated by a shared secret in the `x-admin-secret` header, checked against
+// `PERPLEX_ADMIN_SECRET`. When that env var is unset the routes are disabled
+// (every call 401s) so a misconfigured deploy can't expose force-close to the
+// public. Not part of the user-facing api-contract, so no utoipa annotations.
+
+fn check_admin(headers: &HeaderMap) -> Result<(), ApiError> {
+    let want = std::env::var("PERPLEX_ADMIN_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ApiError::Unauthorized("admin endpoints disabled (PERPLEX_ADMIN_SECRET unset)".into())
+        })?;
+    let got = headers
+        .get("x-admin-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if got == want {
+        Ok(())
+    } else {
+        Err(ApiError::Unauthorized("invalid admin secret".into()))
+    }
+}
+
+/// GET /v1/admin/liquidatable — every open position with health factor < 1.0.
+pub async fn list_liquidatable(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<LiquidatablePosition>>, ApiError> {
+    check_admin(&headers)?;
+    Ok(Json(state.scan_liquidatable()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LiquidateRequest {
+    pub address: String,
+    #[serde(rename = "marketId")]
+    pub market_id: String,
+}
+
+/// POST /v1/admin/liquidate — force-close one underwater position. 400 when the
+/// position is absent or not actually liquidatable (health >= 1), so a racing
+/// keeper can't close a healthy account.
+pub async fn liquidate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<LiquidateRequest>,
+) -> Result<Json<LiquidationOutcome>, ApiError> {
+    check_admin(&headers)?;
+    state
+        .liquidate_position(&req.address, &req.market_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::BadRequest("position not found or not liquidatable".into()))
 }
 
 // -- dev helper: mint a JWT for `address` without going through SIWE. Returns the same JSON

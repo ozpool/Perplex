@@ -6,11 +6,11 @@ members = [
     "crates/perplex-diff-gen",
     "crates/perplex-edge",
     "crates/perplex-funding",
+    "crates/perplex-liquidator",
     "crates/perplex-matching",
     "crates/perplex-oracle",
     # additional crates land in their respective phases:
     #   "crates/perplex-settlement"  (Phase 2 — handled by Solidity SettlementEngine for now)
-    #   "crates/perplex-liquidator"  (Phase 4)
     #   "crates/perplex-mock-oracle" (added when HTTP stub is wired)
 ]
 
