@@ -8,10 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::types::{
-    FillInfo, MarketInfo, OpenOrder, PositionInfo, PositionsResponse, PublicTrade,
-};
+use crate::db::{DbSnapshot, PersistEvent};
+use crate::types::{FillInfo, MarketInfo, OpenOrder, PositionInfo, PositionsResponse, PublicTrade};
 
 /// Result of crossing a taker order against the existing resting book.
 #[derive(Debug, Clone)]
@@ -78,6 +78,10 @@ struct Inner {
     /// the on-chain vault path — but on locally so traders can place orders
     /// without spinning up Anvil + the deposit relayer just to smoke-test.
     dev_seed_vault: bool,
+    /// Sink for durable mutations. `Some` when Postgres persistence is wired
+    /// (the running binary); `None` in unit tests, where state lives only in
+    /// memory. Mutators emit onto this; the writer task drains it. See `db.rs`.
+    persist_tx: Option<UnboundedSender<PersistEvent>>,
 }
 
 #[derive(Default, Clone)]
@@ -94,29 +98,64 @@ const DEV_SEED_USDC_RAW: &str = "100000000000";
 
 impl AppState {
     pub fn new(jwt_secret: Vec<u8>) -> Self {
-        Self::with_options(jwt_secret, false)
+        Self::with_options(jwt_secret, false, DbSnapshot::default(), None)
     }
 
     pub fn new_dev(jwt_secret: Vec<u8>) -> Self {
-        Self::with_options(jwt_secret, true)
+        Self::with_options(jwt_secret, true, DbSnapshot::default(), None)
     }
 
-    fn with_options(jwt_secret: Vec<u8>, dev_seed_vault: bool) -> Self {
+    /// Build a persistence-backed state: seed the in-memory stores from a
+    /// `DbSnapshot` loaded at boot, and route every future mutation to `tx` so
+    /// the writer task mirrors it back to Postgres. Used by the binary; tests
+    /// use `new`/`new_dev` and stay memory-only.
+    pub fn new_persisted(
+        jwt_secret: Vec<u8>,
+        dev_seed_vault: bool,
+        snapshot: DbSnapshot,
+        tx: UnboundedSender<PersistEvent>,
+    ) -> Self {
+        let state = Self::with_options(jwt_secret, dev_seed_vault, snapshot, Some(tx));
+        // Rebuild the public orderbook for every market from the rehydrated
+        // resting orders so the book isn't empty until the next mutation.
+        let market_ids: Vec<String> = state.inner.markets.keys().cloned().collect();
+        for mid in market_ids {
+            state.rebuild_orderbook(&mid);
+        }
+        state
+    }
+
+    fn with_options(
+        jwt_secret: Vec<u8>,
+        dev_seed_vault: bool,
+        snapshot: DbSnapshot,
+        persist_tx: Option<UnboundedSender<PersistEvent>>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 markets: default_markets(),
                 orderbooks: RwLock::new(default_books()),
-                public_trades: RwLock::new(HashMap::new()),
-                open_orders: RwLock::new(HashMap::new()),
-                positions: RwLock::new(HashMap::new()),
-                fills: RwLock::new(HashMap::new()),
-                vault_balances: RwLock::new(HashMap::new()),
+                public_trades: RwLock::new(snapshot.public_trades),
+                open_orders: RwLock::new(snapshot.open_orders),
+                positions: RwLock::new(snapshot.positions),
+                fills: RwLock::new(snapshot.fills),
+                vault_balances: RwLock::new(snapshot.vault_balances),
                 siwe_nonces: RwLock::new(HashMap::new()),
                 jwt_secret,
-                funding_history: RwLock::new(HashMap::new()),
+                funding_history: RwLock::new(snapshot.funding_history),
                 oracle_prices: RwLock::new(HashMap::new()),
                 dev_seed_vault,
+                persist_tx,
             }),
+        }
+    }
+
+    /// Emit a durable mutation to the writer task. No-op when persistence is
+    /// off (unit tests). Never blocks — the channel is unbounded; a closed
+    /// channel (writer gone) is logged once by the caller path, not here.
+    fn emit(&self, ev: PersistEvent) {
+        if let Some(tx) = &self.inner.persist_tx {
+            let _ = tx.send(ev);
         }
     }
 
@@ -127,9 +166,14 @@ impl AppState {
             return;
         }
         let mut vaults = self.inner.vault_balances.write();
-        vaults
-            .entry(address.to_string())
-            .or_insert_with(|| DEV_SEED_USDC_RAW.to_string());
+        if !vaults.contains_key(address) {
+            vaults.insert(address.to_string(), DEV_SEED_USDC_RAW.to_string());
+            drop(vaults);
+            self.emit(PersistEvent::UpsertVault {
+                address: address.to_string(),
+                amount: DEV_SEED_USDC_RAW.to_string(),
+            });
+        }
     }
 
     pub fn jwt_secret(&self) -> &[u8] {
@@ -304,6 +348,9 @@ impl AppState {
     }
 
     pub fn record_trade(&self, market_id: &str, trade: PublicTrade) {
+        self.emit(PersistEvent::InsertTrade {
+            trade: trade.clone(),
+        });
         self.inner
             .public_trades
             .write()
@@ -323,6 +370,10 @@ impl AppState {
 
     pub fn add_open_order(&self, address: &str, order: OpenOrder) {
         let market_id = order.market_id.clone();
+        self.emit(PersistEvent::UpsertOrder {
+            address: address.to_string(),
+            order: order.clone(),
+        });
         self.inner
             .open_orders
             .write()
@@ -346,6 +397,11 @@ impl AppState {
             false
         };
         drop(g);
+        if changed {
+            self.emit(PersistEvent::DeleteOrder {
+                id: order_id.to_string(),
+            });
+        }
         if let Some(mid) = market_id {
             self.rebuild_orderbook(&mid);
         }
@@ -596,6 +652,27 @@ impl AppState {
         // Phase 3 — refresh the public orderbook snapshot.
         self.rebuild_orderbook(market_id);
 
+        // Phase 4 — persist the maker books that changed. Matching decremented
+        // (and possibly reaped) one or more maker orders; only the addresses in
+        // `filled` were touched, so re-sync just those lists rather than the
+        // whole map. No-op when persistence is off.
+        if self.inner.persist_tx.is_some() && !filled.is_empty() {
+            let mut seen: Vec<String> = Vec::new();
+            for f in &filled {
+                if !seen.contains(&f.maker_address) {
+                    seen.push(f.maker_address.clone());
+                }
+            }
+            let orders = self.inner.open_orders.read();
+            for addr in seen {
+                let list = orders.get(&addr).cloned().unwrap_or_default();
+                self.emit(PersistEvent::SyncOrders {
+                    address: addr,
+                    orders: list,
+                });
+            }
+        }
+
         filled
     }
 
@@ -605,6 +682,24 @@ impl AppState {
     /// the new qty exceeds the resting size. Mark price tracks entry until an
     /// oracle relayer is wired - good enough to render the position panel.
     pub fn upsert_position(
+        &self,
+        address: &str,
+        market_id: &str,
+        order_side: &str,
+        qty: Decimal,
+        price: Decimal,
+    ) {
+        self.apply_position_fill(address, market_id, order_side, qty, price);
+        if self.inner.persist_tx.is_some() {
+            let positions = self.positions_for(address);
+            self.emit(PersistEvent::SyncPositions {
+                address: address.to_string(),
+                positions,
+            });
+        }
+    }
+
+    fn apply_position_fill(
         &self,
         address: &str,
         market_id: &str,
@@ -698,6 +793,10 @@ impl AppState {
     }
 
     pub fn set_positions(&self, address: &str, positions: Vec<PositionInfo>) {
+        self.emit(PersistEvent::SyncPositions {
+            address: address.to_string(),
+            positions: positions.clone(),
+        });
         self.inner
             .positions
             .write()
@@ -718,6 +817,10 @@ impl AppState {
     }
 
     pub fn record_fill(&self, address: &str, fill: FillInfo) {
+        self.emit(PersistEvent::InsertFill {
+            address: address.to_string(),
+            fill: fill.clone(),
+        });
         self.inner
             .fills
             .write()
@@ -738,10 +841,7 @@ impl AppState {
 
         let mut positions = self.positions_for(address);
         let collateral_str = self.vault_balance(address);
-        let collateral_dollars = collateral_str
-            .parse::<Decimal>()
-            .unwrap_or_default()
-            / usdc_scale;
+        let collateral_dollars = collateral_str.parse::<Decimal>().unwrap_or_default() / usdc_scale;
 
         let mut total_notional = Decimal::ZERO;
         let mut total_pnl = Decimal::ZERO;
@@ -786,7 +886,11 @@ impl AppState {
 
         let free = {
             let raw = collateral_dollars + total_pnl - used_margin;
-            if raw < Decimal::ZERO { Decimal::ZERO } else { raw }
+            if raw < Decimal::ZERO {
+                Decimal::ZERO
+            } else {
+                raw
+            }
         };
 
         PositionsResponse {
@@ -808,6 +912,10 @@ impl AppState {
     }
 
     pub fn set_vault_balance(&self, address: &str, amount: String) {
+        self.emit(PersistEvent::UpsertVault {
+            address: address.to_string(),
+            amount: amount.clone(),
+        });
         self.inner
             .vault_balances
             .write()
@@ -828,6 +936,11 @@ impl AppState {
     }
 
     pub fn record_funding_point(&self, market_id: &str, ts_ns: u64, rate_bps: f64) {
+        self.emit(PersistEvent::InsertFunding {
+            market_id: market_id.to_string(),
+            ts_ns,
+            rate_bps,
+        });
         self.inner
             .funding_history
             .write()
@@ -1157,5 +1270,68 @@ mod tests {
         let snap = state.orderbook("btc-usd").unwrap();
         assert!(snap.bids.is_empty());
         assert!(snap.asks.is_empty());
+    }
+
+    // -- persistence wiring (no live Postgres; exercises the snapshot rehydrate
+    //    path and the event channel that the writer task drains in prod) ------
+
+    #[test]
+    fn new_persisted_rehydrates_orders_balances_and_rebuilds_book() {
+        let mut snapshot = DbSnapshot::default();
+        snapshot
+            .open_orders
+            .insert("0xmaker".into(), vec![order("o1", "buy", "99950", "0.3")]);
+        snapshot
+            .vault_balances
+            .insert("0xmaker".into(), "12345".into());
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = AppState::new_persisted(b"test".to_vec(), false, snapshot, tx);
+
+        // Stores came back populated...
+        assert_eq!(state.open_orders_for("0xmaker").len(), 1);
+        assert_eq!(state.vault_balance("0xmaker"), "12345");
+        // ...and the public book was rebuilt from the resting order on boot.
+        let snap = state.orderbook("btc-usd").expect("book rebuilt");
+        assert_eq!(snap.bids, vec![["99950".to_string(), "0.3".to_string()]]);
+    }
+
+    #[test]
+    fn mutations_emit_persist_events() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = AppState::new_persisted(b"test".to_vec(), false, DbSnapshot::default(), tx);
+
+        state.add_open_order("0xa", order("o1", "buy", "99000", "0.1"));
+        match rx.try_recv().expect("order event emitted") {
+            PersistEvent::UpsertOrder { address, order } => {
+                assert_eq!(address, "0xa");
+                assert_eq!(order.id, "o1");
+            }
+            other => panic!("expected UpsertOrder, got {other:?}"),
+        }
+
+        state.set_vault_balance("0xa", "500".into());
+        match rx.try_recv().expect("vault event emitted") {
+            PersistEvent::UpsertVault { address, amount } => {
+                assert_eq!(address, "0xa");
+                assert_eq!(amount, "500");
+            }
+            other => panic!("expected UpsertVault, got {other:?}"),
+        }
+
+        assert!(state.cancel_order("0xa", "o1"));
+        match rx.try_recv().expect("cancel event emitted") {
+            PersistEvent::DeleteOrder { id } => assert_eq!(id, "o1"),
+            other => panic!("expected DeleteOrder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn memory_only_state_emits_nothing() {
+        // AppState::new has no persist channel; mutating must not panic and
+        // must stay a pure in-memory path (this is what every unit test and
+        // CI run without Postgres relies on).
+        let state = AppState::new(b"test".to_vec());
+        state.add_open_order("0xa", order("o1", "buy", "99000", "0.1"));
+        assert_eq!(state.open_orders_for("0xa").len(), 1);
     }
 }
