@@ -15,6 +15,33 @@ use crate::types::*;
 const MAX_TRADES: usize = 1000;
 const MAX_FILLS: usize = 1000;
 
+/// Render a USDC dollar amount as a 6-decimal raw integer string (the wire
+/// encoding the API uses for money). Signed: negatives are preserved.
+fn to_usdc6(dollars: Decimal) -> String {
+    (dollars * Decimal::from(1_000_000u64)).trunc().to_string()
+}
+
+/// Apply a signed dollar delta to an address's vault balance (stored as a
+/// 6-decimal raw string). Clamps at zero so a fee can't drive a balance
+/// negative.
+fn adjust_vault(state: &AppState, address: &str, delta_dollars: Decimal) {
+    if delta_dollars.is_zero() {
+        return;
+    }
+    let current = state
+        .vault_balance(address)
+        .parse::<Decimal>()
+        .unwrap_or_default();
+    let delta_raw = (delta_dollars * Decimal::from(1_000_000u64)).trunc();
+    let next = current + delta_raw;
+    let next = if next < Decimal::ZERO {
+        Decimal::ZERO
+    } else {
+        next
+    };
+    state.set_vault_balance(address, next.to_string());
+}
+
 // -- 1.1 GET /v1/markets ------------------------------------------------------
 
 #[utoipa::path(get, path = "/v1/markets", responses((status = 200, body = MarketsResponse)))]
@@ -306,10 +333,24 @@ pub async fn place_order(
     let taker_side = req.side.clone();
     let maker_side = if taker_side == "buy" { "sell" } else { "buy" };
 
+    // Fee schedule for this market. Taker pays takerFeeBps of notional; maker
+    // earns makerRebateBps (signed — a negative rebate would mean the maker also
+    // pays). Both settle into the vault balances per fill below.
+    let (taker_fee_bps, maker_rebate_bps) = state
+        .market(&req.market_id)
+        .map(|m| (m.taker_fee_bps, m.maker_rebate_bps))
+        .unwrap_or((0, 0));
+    let bps = Decimal::from(10_000u64);
+
     for m in &matches {
         let price_str = m.price.normalize().to_string();
         let qty_str = m.qty.normalize().to_string();
         let ts_str = m.ts_ns.to_string();
+
+        // Fee + rebate in USDC dollars for this fill.
+        let notional = m.qty * m.price;
+        let taker_fee = notional * Decimal::from(taker_fee_bps) / bps;
+        let maker_rebate = notional * Decimal::from(maker_rebate_bps) / bps;
 
         state.record_fill(
             &user.address,
@@ -320,7 +361,8 @@ pub async fn place_order(
                 side: taker_side.clone(),
                 price: price_str.clone(),
                 qty: qty_str.clone(),
-                fee_usdc: "0".into(),
+                // Positive = charged to the taker.
+                fee_usdc: to_usdc6(taker_fee),
                 role: "taker".into(),
                 ts_ns: ts_str.clone(),
                 tx_hash: String::new(),
@@ -335,12 +377,19 @@ pub async fn place_order(
                 side: maker_side.to_string(),
                 price: price_str.clone(),
                 qty: qty_str.clone(),
-                fee_usdc: "0".into(),
+                // Negative = credited to the maker (rebate received).
+                fee_usdc: to_usdc6(-maker_rebate),
                 role: "maker".into(),
                 ts_ns: ts_str.clone(),
                 tx_hash: String::new(),
             },
         );
+
+        // Settle the fee/rebate into vault balances: taker pays, maker earns.
+        // The net (taker_fee - maker_rebate) is the protocol's take; an explicit
+        // protocol/insurance balance lands with on-chain settlement.
+        adjust_vault(&state, &user.address, -taker_fee);
+        adjust_vault(&state, &m.maker_address, maker_rebate);
         state.record_trade(
             &req.market_id,
             PublicTrade {

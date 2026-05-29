@@ -345,3 +345,80 @@ async fn place_order_rejects_undercollateralised() {
     assert_eq!(res.status(), StatusCode::OK, "small order within margin");
     handle.abort();
 }
+
+#[tokio::test]
+async fn fills_charge_fee_and_settle_vault() {
+    let (base, handle) = spawn_server().await;
+    let client = reqwest::Client::new();
+    let maker = "0x000000000000000000000000000000000000Ma01";
+    let taker = "0x000000000000000000000000000000000000Ta01";
+    let maker_jwt = format!("Bearer {}", dev_token(&client, &base, maker).await);
+    let taker_jwt = format!("Bearer {}", dev_token(&client, &base, taker).await);
+
+    // Maker rests a sell; taker market-buys into it so a fill happens.
+    let rest = serde_json::json!({
+        "marketId": "btc-usd", "side": "sell", "type": "limit",
+        "price": "99500.0", "qty": "0.5", "timeInForce": "gtc",
+        "reduceOnly": false, "postOnly": false, "nonce": "1",
+        "signature": "0x".to_string() + &"00".repeat(65),
+    });
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .header("Authorization", &maker_jwt)
+        .json(&rest)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "maker rest");
+
+    let take = serde_json::json!({
+        "marketId": "btc-usd", "side": "buy", "type": "market",
+        "qty": "0.1", "timeInForce": "ioc",
+        "reduceOnly": false, "postOnly": false, "nonce": "2",
+        "signature": "0x".to_string() + &"00".repeat(65),
+    });
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .header("Authorization", &taker_jwt)
+        .json(&take)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "taker fill");
+
+    // Taker's fill now carries a non-zero fee (was hardcoded "0").
+    let fills: Value = client
+        .get(format!("{base}/v1/fills?limit=10"))
+        .header("Authorization", &taker_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let fee = fills["fills"][0]["feeUsdc"].as_str().unwrap();
+    assert_ne!(fee, "0", "taker fill should carry a fee");
+    assert!(
+        fee.parse::<i64>().unwrap() > 0,
+        "taker fee is a positive charge"
+    );
+
+    // And the fee was debited from the taker's vault (seeded 100k = 100000000000).
+    let bal: Value = client
+        .get(format!("{base}/v1/account/balance"))
+        .header("Authorization", &taker_jwt)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let vault = bal["vaultBalanceUsdc"]
+        .as_str()
+        .unwrap()
+        .parse::<i64>()
+        .unwrap();
+    assert!(vault < 100_000_000_000, "taker vault debited by the fee");
+
+    handle.abort();
+}
