@@ -3409,6 +3409,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "perplex-liquidator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "perplex-matching"
 version = "0.1.0"
 dependencies = [

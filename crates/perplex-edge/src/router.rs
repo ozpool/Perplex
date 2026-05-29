@@ -34,6 +34,8 @@ pub fn build_router_with_limiter(state: AppState, limiter: RateLimiter) -> Route
         .route("/v1/auth/siwe/nonce", post(handlers::siwe_nonce))
         .route("/v1/auth/siwe/verify", post(handlers::siwe_verify))
         .route("/v1/account/balance", get(handlers::get_balance))
+        .route("/v1/admin/liquidatable", get(handlers::list_liquidatable))
+        .route("/v1/admin/liquidate", post(handlers::liquidate))
         .layer(from_fn_with_state(
             (state.clone(), limiter),
             rate_limit_layer,

@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
+use serde::Serialize;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::db::{DbSnapshot, PersistEvent};
@@ -853,16 +854,16 @@ impl AppState {
                 continue;
             }
             let entry = unscale_x18(&p.entry_price_x18);
-            // Mark price tracks the market's static index price until an
-            // oracle relayer is wired (see /v1/markets seed values). Good
-            // enough to surface a non-zero PnL the instant the user opens a
-            // position; once the relayer ships this pulls from a live feed.
-            let mark = match self.market(&p.market_id) {
+            let market = self.market(&p.market_id);
+            // Mark price tracks the market's index price (live when the oracle
+            // relayer is running, the static seed value otherwise). Good enough
+            // to surface a non-zero PnL the instant the user opens a position.
+            let mark = match &market {
                 Some(m) => unscale_x18(&m.index_price_x18),
                 None => entry,
             };
-            let im_ratio_bps = self
-                .market(&p.market_id)
+            let im_ratio_bps = market
+                .as_ref()
                 .map(|m| Decimal::from(m.im_ratio_bps as u64))
                 .unwrap_or_else(|| Decimal::from(500u64));
             let im_ratio = im_ratio_bps / bps_scale;
@@ -874,6 +875,45 @@ impl AppState {
                 size * (entry - mark)
             };
             let im = notional * im_ratio;
+
+            // Real liquidation price from the shared margin math (the same code
+            // the on-chain engine mirrors), replacing the hardcoded "0". Cross-
+            // margin approximation: each position is priced against the whole
+            // account's collateral — exact for the common single-position case,
+            // conservative otherwise. Left at the stored value when params are
+            // missing or the position is effectively unliquidatable.
+            if let Some(m) = &market {
+                let signed_size = if p.side == "long" { size } else { -size };
+                let core_pos = perplex_core::types::Position {
+                    user: [0u8; 20],
+                    market: [0u8; 32],
+                    size: signed_size,
+                    entry_price: entry,
+                    cumulative_funding: Decimal::ZERO,
+                    last_updated_ts_ns: 0,
+                };
+                let params = perplex_core::types::MarketParams {
+                    im_ratio_bps: m.im_ratio_bps,
+                    mm_ratio_bps: m.mm_ratio_bps,
+                    liq_bonus_bps: m.liq_bonus_bps,
+                    taker_fee_bps: m.taker_fee_bps,
+                    maker_rebate_bps: m.maker_rebate_bps,
+                    active: m.active,
+                };
+                if let Some(liq) =
+                    perplex_core::margin::liquidation_price(&core_pos, collateral_dollars, &params)
+                {
+                    // A negative liq price means collateral exceeds the
+                    // position's downside — effectively unliquidatable. Clamp
+                    // to 0 so the FE renders "—" rather than a nonsense price.
+                    let liq = if liq.is_sign_negative() {
+                        Decimal::ZERO
+                    } else {
+                        liq
+                    };
+                    p.liquidation_price_x18 = scale_x18(liq);
+                }
+            }
 
             p.mark_price_x18 = scale_x18(mark);
             p.unrealised_pnl_usdc = scale_usdc6(pnl);
@@ -957,6 +997,198 @@ impl AppState {
             .cloned()
             .unwrap_or_default()
     }
+
+    /// Assemble the inputs the shared margin math needs for one position:
+    /// (mark, account collateral in dollars, core Position, MarketParams).
+    /// Returns None for a zero-size position or an unknown market.
+    fn liq_inputs(
+        &self,
+        pos: &PositionInfo,
+    ) -> Option<(
+        Decimal,
+        perplex_core::types::Position,
+        perplex_core::types::MarketParams,
+    )> {
+        let size: Decimal = pos.size.parse().ok()?;
+        if size.is_zero() {
+            return None;
+        }
+        let market = self.market(&pos.market_id)?;
+        let mark = unscale_x18(&market.index_price_x18);
+        let entry = unscale_x18(&pos.entry_price_x18);
+        let signed = if pos.side == "long" { size } else { -size };
+        let core = perplex_core::types::Position {
+            user: [0u8; 20],
+            market: [0u8; 32],
+            size: signed,
+            entry_price: entry,
+            cumulative_funding: Decimal::ZERO,
+            last_updated_ts_ns: 0,
+        };
+        let params = perplex_core::types::MarketParams {
+            im_ratio_bps: market.im_ratio_bps,
+            mm_ratio_bps: market.mm_ratio_bps,
+            liq_bonus_bps: market.liq_bonus_bps,
+            taker_fee_bps: market.taker_fee_bps,
+            maker_rebate_bps: market.maker_rebate_bps,
+            active: market.active,
+        };
+        Some((mark, core, params))
+    }
+
+    /// Health factor for one stored position (equity / maintenance margin).
+    /// < 1.0 means liquidatable. None when the position can't be priced.
+    fn position_health(&self, address: &str, pos: &PositionInfo) -> Option<Decimal> {
+        let (mark, core, params) = self.liq_inputs(pos)?;
+        let collateral = self
+            .vault_balance(address)
+            .parse::<Decimal>()
+            .unwrap_or_default()
+            / Decimal::from(1_000_000u64);
+        perplex_core::margin::health_factor(&core, mark, collateral, &params)
+    }
+
+    /// Scan every account for positions whose health factor is below 1.0.
+    /// The keeper polls this, then calls `liquidate_position` on each. Snapshots
+    /// the positions under a short read lock, then computes health lock-free.
+    pub fn scan_liquidatable(&self) -> Vec<LiquidatablePosition> {
+        let snapshot: Vec<(String, PositionInfo)> = {
+            let positions = self.inner.positions.read();
+            positions
+                .iter()
+                .flat_map(|(addr, list)| list.iter().cloned().map(move |p| (addr.clone(), p)))
+                .collect()
+        };
+        let mut out = Vec::new();
+        for (addr, pos) in snapshot {
+            if let Some(h) = self.position_health(&addr, &pos) {
+                if h < Decimal::ONE {
+                    out.push(LiquidatablePosition {
+                        address: addr,
+                        market_id: pos.market_id,
+                        side: pos.side,
+                        size: pos.size,
+                        health_factor: h.normalize().to_string(),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Force-close an underwater position at mark. Realises PnL into the vault
+    /// (bad debt clamps collateral at 0 — the on-chain InsuranceFund absorbs it
+    /// once the trade flow is on-chain), removes the position, and records the
+    /// forced close on the tape and the user's fills. Returns None when the
+    /// position is absent or NOT actually liquidatable (health >= 1), so a
+    /// racing keeper can't close a healthy position.
+    pub fn liquidate_position(&self, address: &str, market_id: &str) -> Option<LiquidationOutcome> {
+        let positions = self.positions_for(address);
+        let pos = positions.iter().find(|p| p.market_id == market_id)?.clone();
+        let health = self.position_health(address, &pos)?;
+        if health >= Decimal::ONE {
+            return None;
+        }
+        let size: Decimal = pos.size.parse().ok()?;
+        let (mark, _, _) = self.liq_inputs(&pos)?;
+        let entry = unscale_x18(&pos.entry_price_x18);
+        let collateral = self
+            .vault_balance(address)
+            .parse::<Decimal>()
+            .unwrap_or_default()
+            / Decimal::from(1_000_000u64);
+        let realised = if pos.side == "long" {
+            size * (mark - entry)
+        } else {
+            size * (entry - mark)
+        };
+        let new_collateral = {
+            let raw = collateral + realised;
+            if raw < Decimal::ZERO {
+                Decimal::ZERO
+            } else {
+                raw
+            }
+        };
+
+        // Settle + remove (both setters emit persistence events).
+        self.set_vault_balance(address, scale_usdc6(new_collateral));
+        let remaining: Vec<PositionInfo> = positions
+            .into_iter()
+            .filter(|p| p.market_id != market_id)
+            .collect();
+        self.set_positions(address, remaining);
+
+        // Record the forced close on the user's fills + the public tape.
+        let close_side = if pos.side == "long" { "sell" } else { "buy" };
+        let price_str = mark.normalize().to_string();
+        let qty_str = size.normalize().to_string();
+        let ts = now_ns().to_string();
+        self.record_fill(
+            address,
+            FillInfo {
+                id: format!("fil_{}", ulid::Ulid::new()),
+                order_id: "liquidation".into(),
+                market_id: market_id.to_string(),
+                side: close_side.to_string(),
+                price: price_str.clone(),
+                qty: qty_str.clone(),
+                fee_usdc: "0".into(),
+                role: "liquidation".into(),
+                ts_ns: ts.clone(),
+                tx_hash: String::new(),
+            },
+        );
+        self.record_trade(
+            market_id,
+            PublicTrade {
+                id: format!("trd_{}", ulid::Ulid::new()),
+                market_id: market_id.to_string(),
+                price: price_str.clone(),
+                qty: qty_str.clone(),
+                side: close_side.to_string(),
+                ts_ns: ts,
+            },
+        );
+
+        Some(LiquidationOutcome {
+            address: address.to_string(),
+            market_id: market_id.to_string(),
+            side: pos.side,
+            size: qty_str,
+            mark_price: price_str,
+            realised_pnl_usdc: scale_usdc6(realised),
+            health_factor: health.normalize().to_string(),
+        })
+    }
+}
+
+/// A position the keeper should liquidate (health factor < 1.0).
+#[derive(Debug, Clone, Serialize)]
+pub struct LiquidatablePosition {
+    pub address: String,
+    #[serde(rename = "marketId")]
+    pub market_id: String,
+    pub side: String,
+    pub size: String,
+    #[serde(rename = "healthFactor")]
+    pub health_factor: String,
+}
+
+/// Result of a successful forced close.
+#[derive(Debug, Clone, Serialize)]
+pub struct LiquidationOutcome {
+    pub address: String,
+    #[serde(rename = "marketId")]
+    pub market_id: String,
+    pub side: String,
+    pub size: String,
+    #[serde(rename = "markPrice")]
+    pub mark_price: String,
+    #[serde(rename = "realisedPnlUsdc")]
+    pub realised_pnl_usdc: String,
+    #[serde(rename = "healthFactor")]
+    pub health_factor: String,
 }
 
 pub fn now_ns() -> u64 {
@@ -1323,6 +1555,30 @@ mod tests {
             PersistEvent::DeleteOrder { id } => assert_eq!(id, "o1"),
             other => panic!("expected DeleteOrder, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn account_summary_fills_real_liquidation_price() {
+        let state = AppState::new(b"test".to_vec());
+        // 1500 USDC collateral (6-decimal raw).
+        state.set_vault_balance("0xt", "1500000000".into());
+        // Open a 0.1 BTC long at 100000.
+        state.upsert_position(
+            "0xt",
+            "btc-usd",
+            "buy",
+            Decimal::from_str_exact("0.1").unwrap(),
+            Decimal::from_str_exact("100000").unwrap(),
+        );
+        let summ = state.account_summary("0xt");
+        let p = &summ.positions[0];
+        // No longer the hardcoded "0".
+        assert_ne!(p.liquidation_price_x18, "0");
+        let liq = unscale_x18(&p.liquidation_price_x18);
+        let entry = unscale_x18(&p.entry_price_x18);
+        // A long liquidates below its entry, at a positive price.
+        assert!(liq > Decimal::ZERO, "liq {liq} must be positive");
+        assert!(liq < entry, "long liq {liq} should sit below entry {entry}");
     }
 
     #[test]
