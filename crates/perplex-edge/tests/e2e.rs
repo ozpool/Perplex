@@ -15,7 +15,9 @@ mod helpers {
 }
 
 async fn spawn_server() -> (String, tokio::task::JoinHandle<()>) {
-    let state = AppState::new(helpers::jwt_secret());
+    // new_dev so the dev-token path seeds the wallet with collateral; the order
+    // endpoints now enforce a margin gate, so an unfunded account can't place.
+    let state = AppState::new_dev(helpers::jwt_secret());
     let router = build_router_with_dev_token_for_tests(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -252,5 +254,53 @@ async fn place_order_rejects_unknown_market() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    handle.abort();
+}
+
+#[tokio::test]
+async fn place_order_rejects_undercollateralised() {
+    let (base, handle) = spawn_server().await;
+    let client = reqwest::Client::new();
+    // Dev-seeded wallet holds 100k USDC. A 100 BTC position at ~99.5k is ~$10M
+    // notional → far more initial margin than 100k covers → must be rejected.
+    let bearer = dev_token(&client, &base, "0x00000000000000000000000000000000DeadBeef").await;
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .bearer_auth(&bearer)
+        .json(&serde_json::json!({
+            "marketId": "btc-usd",
+            "side": "buy",
+            "type": "limit",
+            "price": "99500.0",
+            "qty": "100",
+            "timeInForce": "gtc",
+            "nonce": "1",
+            "signature": "0x".to_string() + &"00".repeat(65),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "oversized order");
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["error"]["code"], "INSUFFICIENT_MARGIN");
+
+    // A small, well-collateralised order on the same wallet still goes through.
+    let res = client
+        .post(format!("{base}/v1/orders"))
+        .bearer_auth(&bearer)
+        .json(&serde_json::json!({
+            "marketId": "btc-usd",
+            "side": "buy",
+            "type": "limit",
+            "price": "99500.0",
+            "qty": "0.1",
+            "timeInForce": "gtc",
+            "nonce": "2",
+            "signature": "0x".to_string() + &"00".repeat(65),
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "small order within margin");
     handle.abort();
 }
