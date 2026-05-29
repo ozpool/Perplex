@@ -43,6 +43,43 @@ Three markets ship in v1: `BTC-USD`, `ETH-USD`, `SOL-USD`. Up to 20× leverage, 
 
 ---
 
+## Status
+
+A snapshot of what the platform does today versus what stands between it and a live, real-money product — and why.
+
+### What works today
+
+- **Perpetual-futures trading** — live orderbook, matching engine, market + limit orders across BTC-USD, ETH-USD, SOL-USD with up to 20× leverage.
+- **Durable state** — orders, positions, fills, balances, public trades, and funding history persist to Postgres and survive a restart with no data loss.
+- **Liquidations** — a keeper detects positions below maintenance margin and force-closes them at the oracle mark; real liquidation prices are shown on every position.
+- **Risk gate on order entry** — orders are rejected when they aren't backed by enough collateral or would exceed the market's max leverage.
+- **Wallet-verified login** — Sign-In-With-Ethereum performs full ECDSA signature recovery, so only the real wallet owner can open a session.
+- **Fees + rebates** — taker fees and maker rebates are charged and settled into balances on every fill.
+- **Live oracle pricing** — BTC/ETH/SOL marks stream from Pyth Hermes in every environment.
+
+### What does not work yet — and why
+
+| Capability | Why not yet | What it needs |
+|---|---|---|
+| **Run on a public blockchain** | Runs on a local dev chain (Anvil), not a public network. | Deploy contracts to Arbitrum Sepolia. Currently blocked only on obtaining testnet gas tokens from a faucet — minor. |
+| **Handle real money** | Uses test USDC; no real deposits or withdrawals. | A security audit and legal clearance first, then point the vault at real USDC on mainnet. The audit and legal work are the real gatekeepers. |
+| **Be reachable on the internet** | Runs only on a local machine; nothing is hosted. | Paid always-on hosting for the backend + database (see below). |
+| **Pass a security audit** | No external audit; some hardening still pending (per-order EIP-712 verification, oracle-manipulation guards). | Engage an audit firm — costs money and takes weeks; required before real funds. |
+| **Deep, real liquidity** | Only the in-house bot quotes the book. | Recruit external market makers + an incentive program. The fee/rebate rails are already built; this is a business effort, not code. |
+| **Operate legally** | Perpetuals are heavily regulated; no entity, geofencing, or terms in place. | A legal entity in a crypto-friendly jurisdiction, region restrictions, and terms of service. Legal, not code. |
+| **Run 24/7 reliably** | No always-on host, alerting, or backups. | Hosting + monitoring + database backups. Structured logs and Prometheus metrics are already wired; they just need a host to run on. |
+
+### Hosting — why the live deployment costs money
+
+The engineering is done; making it publicly reachable and always-on is a hosting cost, not a code task.
+
+- **Free tiers don't fit a live exchange.** **Render**'s free tier sleeps after ~15 minutes of inactivity — the whole stack stops until the next request wakes it (slow cold starts, dropped live connections). **Fly.io**'s free allowance is too small to keep the backend + database + keeper always-on. **Vercel** (free) hosts only the frontend, so the site loads but shows no data.
+- **Paid, always-on options.** **Railway** (usage-based, ~$5-20/month at this size) runs the backend + Postgres + keeper together and stays awake — best value for a live demo. **Fly.io** (paid, pay-as-you-go) is similarly priced and scales well later.
+
+For a genuinely always-on, shareable URL, expect a modest monthly hosting spend on Railway or Fly.io. Free tiers only suit short, on-demand demos.
+
+---
+
 ## Tech stack
 
 | Layer | Stack |
